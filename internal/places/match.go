@@ -39,12 +39,14 @@ type place struct {
 
 // matchKey är ett vikt namn (med alias) förberett för matchning.
 type matchKey struct {
+	str        string
 	runes      []rune
 	wordStarts []int
 }
 
 func newMatchKey(s string) matchKey {
-	k := matchKey{runes: []rune(withAliases(fold(s))), wordStarts: []int{0}}
+	str := withAliases(fold(s))
+	k := matchKey{str: str, runes: []rune(str), wordStarts: []int{0}}
 	for i, r := range k.runes {
 		if r == ' ' {
 			k.wordStarts = append(k.wordStarts, i+1)
@@ -336,14 +338,13 @@ func (s *Snapshot) rank(q string) []hit {
 	if q == "" {
 		return nil
 	}
-	qr := []rune(q)
-	typos := maxTypos(len(qr))
+	m := newMatcher(q)
 	var hits []hit
 	for i := range s.places {
 		p := &s.places[i]
 		if slices.Contains(p.names, q) {
 			hits = append(hits, hit{p, scoreExact, false})
-		} else if score, fuzzy, ok := p.match(qr, typos); ok {
+		} else if score, fuzzy, ok := m.match(p); ok {
 			hits = append(hits, hit{p, score, fuzzy})
 		}
 	}
@@ -358,21 +359,41 @@ func (s *Snapshot) rank(q string) []hit {
 	return hits
 }
 
-// match jämför q med platsens namn. En plats inom en ort ("Lund/Tre Högars
-// väg") matchas i första hand på sitt eget namn. Matchar q bara via orten
-// ("lund", "stockholm") hamnar den efter kommuner och orter, så att de inte
-// trängs undan av alla platser i orten.
-func (p *place) match(q []rune, typos int) (score int, fuzzy, ok bool) {
+// matcher jämför en fråga mot många platser. Den skapas en gång per
+// sökning och återanvänder sina buffertar, så att en jämförelse inte
+// allokerar minne – förslagen anropas vid varje tangenttryckning.
+type matcher struct {
+	q     []rune
+	qs    string // q som sträng
+	qWord string // " " + q, för träff i början av ett ord
+	typos int
+	rows  [3][]int // de tre senaste raderna i prefixDistance
+}
+
+func newMatcher(q string) *matcher {
+	m := &matcher{q: []rune(q), qs: q, qWord: " " + q}
+	m.typos = maxTypos(len(m.q))
+	for i := range m.rows {
+		m.rows[i] = make([]int, len(m.q)+2)
+	}
+	return m
+}
+
+// match jämför frågan med platsens namn. En plats inom en ort ("Lund/Tre
+// Högars väg") matchas i första hand på sitt eget namn. Matchar frågan bara
+// via orten ("lund", "stockholm") hamnar den efter kommuner och orter, så att
+// de inte trängs undan av alla platser i orten.
+func (m *matcher) match(p *place) (score int, fuzzy, ok bool) {
 	if p.Kind == "plats" {
-		if score, ok := matchScore(q, p.own, typos); ok {
+		if score, ok := m.score(p.own); ok {
 			return score, score > scoreContains, true
 		}
-		if score, ok := matchScore(q, p.full, typos); ok {
+		if score, ok := m.score(p.full); ok {
 			return score + scoreViaOrt, score > scoreContains, true
 		}
 		return 0, false, false
 	}
-	score, ok = matchScore(q, p.full, typos)
+	score, ok = m.score(p.full)
 	return score, score > scoreContains, ok
 }
 
@@ -412,61 +433,74 @@ const (
 	scoreViaOrt = 3
 )
 
-// matchScore rangordnar hur väl q matchar key, se konstanterna ovan.
-func matchScore(q []rune, k matchKey, typos int) (int, bool) {
-	qs, ks := string(q), string(k.runes)
+// score rangordnar hur väl frågan matchar k, se konstanterna ovan.
+func (m *matcher) score(k matchKey) (int, bool) {
 	switch {
-	case strings.HasPrefix(ks, qs):
+	case strings.HasPrefix(k.str, m.qs):
 		return scorePrefix, true
-	case strings.Contains(ks, " "+qs):
+	case strings.Contains(k.str, m.qWord):
 		return scoreWord, true
-	case strings.Contains(ks, qs):
+	case strings.Contains(k.str, m.qs):
 		return scoreContains, true
-	case typos == 0:
+	case m.typos == 0:
 		return 0, false
 	}
-	best := typos + 1
+	best := m.typos + 1
 	for _, start := range k.wordStarts {
-		best = min(best, prefixDistance(q, k.runes[start:]))
+		best = min(best, m.prefixDistance(k.runes[start:]))
+		if best == 1 {
+			break // bättre än ett fel går inte, utan exakt träff ovan
+		}
 	}
-	if best > typos {
+	if best > m.typos {
 		return 0, false
 	}
 	return scoreContains + best, true
 }
 
 // prefixDistance är det minsta redigeringsavståndet (med byte av två
-// intilliggande tecken som ett fel) mellan q och någon början av c vars
-// längd skiljer sig högst ett tecken från q. "upsa" mot "uppsala" ger 1.
-func prefixDistance(q, c []rune) int {
+// intilliggande tecken som ett fel) mellan frågan och någon början av c vars
+// längd skiljer sig högst ett tecken från frågan. "upsa" mot "uppsala" ger 1.
+//
+// Räknas rad för rad med tre återanvända rader. Radernas minsta värde kan
+// aldrig minska, så när det överstiger tillåtna skrivfel avbryts jämförelsen
+// – det gör att påhittade frågor blir billiga. Svaret är då bara garanterat
+// större än m.typos, inte exakt.
+func (m *matcher) prefixDistance(c []rune) int {
+	q := m.q
 	c = c[:min(len(c), len(q)+1)]
-	// d[i][j] = avstånd mellan q[:i] och c[:j]
-	d := make([][]int, len(q)+1)
-	for i := range d {
-		d[i] = make([]int, len(c)+1)
-		d[i][0] = i
-	}
-	for j := range d[0] {
-		d[0][j] = j
+	n := len(c)
+	prev2, prev, cur := m.rows[0][:n+1], m.rows[1][:n+1], m.rows[2][:n+1]
+	for j := range prev {
+		prev[j] = j // avstånd mellan tom fråga och c[:j]
 	}
 	for i := 1; i <= len(q); i++ {
-		for j := 1; j <= len(c); j++ {
+		cur[0] = i
+		rowMin := i
+		for j := 1; j <= n; j++ {
 			cost := 1
 			if q[i-1] == c[j-1] {
 				cost = 0
 			}
-			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
+			v := min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
 			if i > 1 && j > 1 && q[i-1] == c[j-2] && q[i-2] == c[j-1] {
-				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+				v = min(v, prev2[j-2]+1)
 			}
+			cur[j] = v
+			rowMin = min(rowMin, v)
 		}
+		if rowMin > m.typos {
+			return rowMin
+		}
+		prev2, prev, cur = prev, cur, prev2
 	}
+	// prev är nu sista raden: avståndet från hela frågan till c[:j].
 	best := math.MaxInt
-	for j := max(0, len(q)-1); j <= len(c); j++ {
-		best = min(best, d[len(q)][j])
+	for j := max(0, len(q)-1); j <= n; j++ {
+		best = min(best, prev[j])
 	}
-	if best == math.MaxInt { // c är mycket kortare än q
-		best = d[len(q)][len(c)]
+	if best == math.MaxInt { // c är mycket kortare än frågan
+		best = prev[n]
 	}
 	return best
 }

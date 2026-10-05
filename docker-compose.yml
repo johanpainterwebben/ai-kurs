@@ -6,3 +6,8 @@ services:
     ports:
       # Bara lokalt; en reverse proxy (t.ex. Caddy) står för HTTPS utåt.
       - "127.0.0.1:8080:8080"
+    # Servern skriver inget till disk och behöver inga extra rättigheter.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true

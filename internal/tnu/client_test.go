@@ -98,6 +98,24 @@ func TestAllStationsHandlesMissingValuesAndBlocked(t *testing.T) {
 	}
 }
 
+func TestErrorsDoNotLeakURL(t *testing.T) {
+	hc := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection refused")
+	})}
+	_, err := NewClient("min@epost.se", "hemlig", hc).AllStations(context.Background())
+	if err == nil {
+		t.Fatal("vill ha fel")
+	}
+	for _, secret := range []string{"epost", "sign=", "cli=", "api.temperatur.nu"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Errorf("felet läcker %q: %v", secret, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("orsaken ska finnas kvar: %v", err)
+	}
+}
+
 func TestUnsignedBudget(t *testing.T) {
 	var reqs []string
 	c := fixtureClient(t, "", `{"client":"unsigned","stations":[]}`, &reqs)

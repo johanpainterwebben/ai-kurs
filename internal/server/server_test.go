@@ -40,8 +40,15 @@ func newTestServer(t *testing.T, err error) (http.Handler, *countingSource) {
 	}
 	src := &countingSource{Source: mock, err: err}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	static := fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}
-	return New(places.NewIndex(src, 5*time.Minute, log), static, log).Handler(), src
+	static := fstest.MapFS{
+		"index.html":       {Data: []byte("<!doctype html>")},
+		"fonts/font.woff2": {Data: []byte("font")},
+	}
+	srv, e := New(places.NewIndex(src, 5*time.Minute, log), static, log)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return srv.Handler(), src
 }
 
 func get[T any](t *testing.T, h http.Handler, path, q string) (int, T) {
@@ -106,7 +113,11 @@ func TestSearchReportsStaleData(t *testing.T) {
 	mock, _ := tnu.NewMock()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	idx := staleIndex{places.NewIndex(mock, 5*time.Minute, log)}
-	h = New(idx, fstest.MapFS{}, log).Handler()
+	srv, err := New(idx, fstest.MapFS{}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h = srv.Handler()
 	code, body := get[searchResponse](t, h, "/api/search", "Lund")
 	if code != http.StatusOK || !body.Stale || body.Total != 10 {
 		t.Fatalf("status %d, stale=%v, total=%d; vill ha 200, true, 10", code, body.Stale, body.Total)
@@ -148,5 +159,40 @@ func TestStaticAndHeaders(t *testing.T) {
 	}
 	if rec.Header().Get("Content-Security-Policy") == "" {
 		t.Error("CSP saknas")
+	}
+}
+
+func TestStaticFiles(t *testing.T) {
+	h, _ := newTestServer(t, nil)
+	serve := func(path string, header ...string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for i := 0; i < len(header); i += 2 {
+			req.Header.Set(header[i], header[i+1])
+		}
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	for _, p := range []string{"/fonts/", "/fonts", "/finnsinte.js", "/main.go"} {
+		if rec := serve(p); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status %d, vill ha 404 (ingen katalogvisning)", p, rec.Code)
+		}
+	}
+	// Routern städar sökvägen och skickar vidare till /main.go, som ger 404.
+	if rec := serve("/../main.go"); rec.Code == http.StatusOK {
+		t.Error("/../main.go ska aldrig ge en fil")
+	}
+
+	rec := serve("/fonts/font.woff2")
+	etag := rec.Header().Get("ETag")
+	if rec.Code != http.StatusOK || etag == "" || !strings.Contains(rec.Header().Get("Cache-Control"), "max-age") {
+		t.Fatalf("status %d, ETag %q, Cache-Control %q", rec.Code, etag, rec.Header().Get("Cache-Control"))
+	}
+	if rec := serve("/fonts/font.woff2", "If-None-Match", etag); rec.Code != http.StatusNotModified {
+		t.Errorf("oförändrad fil ska ge 304, fick %d", rec.Code)
+	}
+	if rec := serve("/"); rec.Header().Get("Cache-Control") != "no-cache" || rec.Header().Get("ETag") == "" {
+		t.Errorf("index.html ska alltid kontrolleras: %v", rec.Header())
 	}
 }

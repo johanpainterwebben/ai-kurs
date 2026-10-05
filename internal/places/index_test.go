@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -269,5 +270,30 @@ func TestStaleAfterMoreThanThreeFailuresInARow(t *testing.T) {
 	}
 	if x.Stale() {
 		t.Fatal("felräkningen ska ha nollställts av den lyckade hämtningen")
+	}
+}
+
+type panicSource struct{ calls atomic.Int32 }
+
+func (p *panicSource) AllStations(context.Context) ([]tnu.Station, error) {
+	p.calls.Add(1)
+	panic("oväntad data")
+}
+
+func TestPanicInFetchBecomesError(t *testing.T) {
+	src := &panicSource{}
+	x, clk := newTestIndex(src)
+	if _, err := x.Get(context.Background()); err == nil || !strings.Contains(err.Error(), "panik") {
+		t.Fatalf("panik ska bli ett fel, fick %v", err)
+	}
+	// Index fungerar vidare och respekterar intervallet.
+	x.Get(context.Background())
+	if n := src.calls.Load(); n != 1 {
+		t.Fatalf("%d försök inom intervallet, vill ha 1", n)
+	}
+	clk.add(5 * time.Minute)
+	x.Get(context.Background())
+	if n := src.calls.Load(); n != 2 {
+		t.Fatalf("efter intervallet ska nytt försök göras, fick %d", n)
 	}
 }

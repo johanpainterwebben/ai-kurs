@@ -8,7 +8,7 @@ import (
 	"temperatur/internal/tnu"
 )
 
-func realSnapshot(t *testing.T) *Snapshot {
+func realSnapshot(t testing.TB) *Snapshot {
 	t.Helper()
 	m, err := tnu.NewMock()
 	if err != nil {
@@ -280,7 +280,9 @@ func TestPrefixDistance(t *testing.T) {
 		{"abc", "a", 2},
 	}
 	for _, tt := range tests {
-		if got := prefixDistance([]rune(tt.q), []rune(tt.c)); got != tt.want {
+		m := newMatcher(tt.q)
+		m.typos = 99 // räkna exakt, utan att avbryta tidigt
+		if got := m.prefixDistance([]rune(tt.c)); got != tt.want {
 			t.Errorf("prefixDistance(%q, %q) = %d, vill ha %d", tt.q, tt.c, got, tt.want)
 		}
 	}

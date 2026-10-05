@@ -102,6 +102,12 @@ func (c *Client) get(ctx context.Context, params string, out *apiResponse) error
 	req.Header.Set("User-Agent", "temperatur-sok/1.0")
 	res, err := c.http.Do(req)
 	if err != nil {
+		// Felet innehåller annars hela URL:en, med cli (e-postadress) och en
+		// signatur som går att återanvända. Sådant ska inte hamna i loggar.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return fmt.Errorf("tnu: anrop misslyckades: %w", err)
 	}
 	defer res.Body.Close()

@@ -8,6 +8,7 @@ package places
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -118,11 +119,9 @@ func (x *Index) refresh(done chan struct{}) {
 	defer cancel()
 
 	start := x.now()
-	stations, err := x.src.AllStations(ctx)
-	var snap *Snapshot
+	snap, err := x.fetch(ctx)
 	if err == nil {
-		snap = newSnapshot(stations, x.now())
-		x.log.Info("hämtade alla mätpunkter", "antal", len(stations), "tid", x.now().Sub(start))
+		x.log.Info("hämtade alla mätpunkter", "antal", len(snap.stations), "tid", x.now().Sub(start))
 	} else {
 		x.log.Error("kunde inte hämta mätpunkter", "err", err)
 	}
@@ -144,4 +143,21 @@ func (x *Index) refresh(done chan struct{}) {
 	x.refreshing = nil
 	x.mu.Unlock()
 	close(done)
+}
+
+// fetch hämtar och bearbetar listan. En panik (t.ex. av oväntad data)
+// blir ett vanligt fel: annars skulle servern krascha, startas om av Docker
+// och hämta på nytt direkt – en loop som bryter mot femminutersregeln och
+// kan få klienten blockerad.
+func (x *Index) fetch(ctx context.Context) (snap *Snapshot, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			snap, err = nil, fmt.Errorf("places: panik vid hämtning: %v", r)
+		}
+	}()
+	stations, err := x.src.AllStations(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return newSnapshot(stations, x.now()), nil
 }

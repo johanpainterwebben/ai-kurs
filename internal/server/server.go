@@ -3,11 +3,14 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -45,13 +48,17 @@ type Index interface {
 // Server håller beroendena för HTTP-hanterarna.
 type Server struct {
 	index  Index
-	static fs.FS
+	static http.Handler
 	log    *slog.Logger
 }
 
-// New skapar en server.
-func New(index Index, static fs.FS, log *slog.Logger) *Server {
-	return &Server{index: index, static: static, log: log}
+// New skapar en server som serverar filerna i static som webbsida.
+func New(index Index, static fs.FS, log *slog.Logger) (*Server, error) {
+	h, err := staticHandler(static)
+	if err != nil {
+		return nil, err
+	}
+	return &Server{index: index, static: h, log: log}, nil
 }
 
 // Handler returnerar alla routes.
@@ -60,7 +67,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/suggest", s.handleSuggest)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
-	mux.Handle("GET /", http.FileServerFS(s.static))
+	mux.Handle("GET /", s.static)
 	return securityHeaders(mux)
 }
 
@@ -135,12 +142,63 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// staticHandler serverar de inbäddade filerna. Inbäddade filer saknar
+// ändringsdatum, så utan ETag kan webbläsaren inte cacha dem och laddar ned
+// allt vid varje besök. ETag är en hash av innehållet och räknas ut en gång;
+// oförändrade filer ger då 304. Bara filer som finns serveras – inga
+// kataloglistningar.
+func staticHandler(files fs.FS) (http.Handler, error) {
+	etags := map[string]string{}
+	err := fs.WalkDir(files, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(files, p)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(b)
+		etags["/"+p] = `"` + hex.EncodeToString(sum[:12]) + `"`
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	fileServer := http.FileServerFS(files)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/" {
+			p = "/index.html"
+		}
+		etag, ok := etags[p]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		switch path.Ext(p) {
+		case ".html", ".css", ".js":
+			// Fråga alltid om filen ändrats, så att en ny version syns direkt.
+			w.Header().Set("Cache-Control", "no-cache")
+		default:
+			// Typsnitt och bilder ändras sällan.
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
+		fileServer.ServeHTTP(w, r)
+	}), nil
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'; "+
+			"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		// "Min plats" kommer att behöva geolocation=(self).
+		h.Set("Permissions-Policy", "geolocation=(), camera=(), microphone=(), payment=(), usb=()")
 		next.ServeHTTP(w, r)
 	})
 }

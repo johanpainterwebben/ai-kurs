@@ -90,9 +90,14 @@ func run(log *slog.Logger) error {
 	if addr == "" {
 		addr = ":8080"
 	}
+	s, err := server.New(index, static, log)
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           server.New(index, static, log).Handler(),
+		Handler:           s.Handler(),
+		MaxHeaderBytes:    16 << 10, // räcker gott för GET-anrop; standard är 1 MB
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,
