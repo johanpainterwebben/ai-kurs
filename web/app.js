@@ -6,6 +6,8 @@ const suggestionsEl = document.getElementById("suggestions");
 const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
 const staleEl = document.getElementById("stale-notice");
+const figureEl = document.getElementById("figure");
+const figureTitle = document.getElementById("figure-title");
 const didYouMeanEl = document.getElementById("did-you-mean");
 const list = document.getElementById("stations");
 
@@ -51,6 +53,7 @@ function loadFromURL() {
     search(q);
   } else {
     clearResults();
+    showWeather(null);
   }
 }
 
@@ -123,6 +126,10 @@ function render(data) {
     summaryLink.hidden = true;
     list.replaceChildren(...data.stations.map(stationItem));
   }
+  // Listen upptill på kortet får temperaturens färg.
+  const shownTemp = total === 1 ? data.stations[0].temp : data.average;
+  summaryEl.dataset.level = shownTemp == null ? "none" : tempLevel(shownTemp);
+  showWeather(shownTemp);
   summaryEl.hidden = false;
 
   // Kort sammanfattning för skärmläsare; resten finns i kortet och listan.
@@ -220,6 +227,53 @@ function showStatus(text, { error = false, visuallyHidden = false } = {}) {
   statusEl.hidden = !text;
   statusEl.classList.toggle("error", error);
   statusEl.classList.toggle("visually-hidden", visuallyHidden);
+}
+
+// ---- Gubben ----
+// Gubben i rubriken är på väg ut ur ett hus och klär sig efter temperaturen
+// på platsen man sökt på:
+// t-shirt och långbyxor vid 15–20°, mer kläder ned mot −20° och mindre upp
+// mot +40° (men aldrig naken – och svettig). Snö på taket och i luften när
+// det är kallt, sol när det är varmt. Varje plagg är ett <g data-item="…"> i SVG:n i
+// index.html.
+
+// Klädnivåer från kallast till varmast; max är övre gräns i °C.
+const OUTFITS = [
+  { max: -12, items: ["pants", "boots", "puffer", "mittens", "scarf", "beanie", "rosy", "breath", "snow"], text: "dunjacka, halsduk, mössa, vantar och kängor" },
+  { max: -4, items: ["pants", "boots", "puffer", "mittens", "scarf", "beanie", "snow"], text: "dunjacka, halsduk, mössa, vantar och kängor" },
+  { max: 4, items: ["pants", "boots", "jacket", "scarf", "beanie", "snow"], text: "jacka, halsduk, mössa och kängor" },
+  { max: 10, items: ["pants", "shoes", "jacket"], text: "jacka, långbyxor och skor" },
+  { max: 15, items: ["pants", "shoes", "hoodie"], text: "huvtröja och långbyxor" },
+  { max: 20, items: ["pants", "shoes", "tshirt"], text: "t-shirt och långbyxor" },
+  { max: 25, items: ["shorts", "shoes", "tshirt"], text: "t-shirt och shorts" },
+  { max: 30, items: ["shorts", "sandals", "tank", "cap", "sunglasses", "sun"], text: "linne, shorts, keps och solglasögon" },
+  { max: 35, items: ["shorts", "sandals", "tank", "sunhat", "sunglasses", "sweat", "sun"], text: "linne, shorts, solhatt och solglasögon – och svettas" },
+  { max: Infinity, items: ["shorts", "sandals", "tank", "sunhat", "sunglasses", "sweat", "sweat-more", "rosy", "sun"], text: "linne, shorts, solhatt och solglasögon – och svettas mycket" },
+];
+
+// NEUTRAL_TEMP ger utgångsklädseln innan man sökt eller när värde saknas.
+const NEUTRAL_TEMP = 17;
+
+// showWeather låter gubben och (i ljust läge) himlen spegla temperaturen t.
+// Utan t visas utgångsläget.
+function showWeather(t) {
+  dressFigure(t);
+  if (t == null) {
+    delete document.documentElement.dataset.climate;
+  } else {
+    document.documentElement.dataset.climate = tempLevel(t);
+  }
+}
+
+// dressFigure klär gubben för temperaturen t (eller utgångsläget om t saknas).
+function dressFigure(t) {
+  const outfit = OUTFITS.find((o) => (t ?? NEUTRAL_TEMP) <= o.max);
+  for (const g of figureEl.querySelectorAll("[data-item]")) {
+    g.toggleAttribute("data-off", !outfit.items.includes(g.dataset.item));
+  }
+  figureTitle.textContent = t == null
+    ? `Gubbe i ${outfit.text} på väg ut genom dörren`
+    : `Gubbe på väg ut, klädd för ${formatTemp(t)}: ${outfit.text}`;
 }
 
 // ---- Förslag medan man skriver ----

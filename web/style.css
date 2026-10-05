@@ -1,8 +1,10 @@
 /*
- * Färger: pastell med hög kontrast. Ljust/mörkt läge följer operativsystemet.
- * Alla textfärger klarar WCAG AAA (minst 7:1) mot sina bakgrunder och
- * kanter/fokus minst 3:1. Det kontrolleras av contrast_test.go – ändrar du
- * en färg här, kör `go test`.
+ * Somrig pastell med hög kontrast: en himmel som övergår i sand, med solsken
+ * i hörnet – och en sommarnatt i mörkt läge. Ljust/mörkt följer operativsystemet.
+ *
+ * All text klarar WCAG AAA (minst 7:1) mot alla bakgrunder den kan hamna på,
+ * även gradientens ändpunkter och solskenet (--sky, --bg, --glow); kanter och
+ * fokus minst 3:1. Det kontrolleras av contrast_test.go – kör `go test`.
  */
 
 @font-face {
@@ -13,23 +15,33 @@
   font-display: swap;
 }
 
+/* Himlens färger registreras så att de kan glida mjukt när temperaturen ändras. */
+@property --sky { syntax: "<color>"; inherits: true; initial-value: #dcefff; }
+@property --bg { syntax: "<color>"; inherits: true; initial-value: #fff8ee; }
+@property --glow { syntax: "<color>"; inherits: true; initial-value: #ffdfb8; }
+@property --glow-size { syntax: "<length>"; inherits: true; initial-value: 440px; }
+
 :root {
   color-scheme: light;
 
-  --bg: #f6f3fb;
+  /* Sommardag */
+  --sky: #dcefff;      /* himlen överst */
+  --bg: #fff8ee;       /* sand längre ned */
+  --glow: #ffdfb8;     /* solsken i hörnet */
+  --glow-size: 440px;
   --surface: #ffffff;
-  --text: #1c1a2b;
-  --text-2: #4a4561;
-  --border: #7d7795;   /* fältkanter, minst 3:1 */
-  --line: #e4dfee;     /* avdelare, bara dekor */
-  --select: #eee8fc;   /* markerat förslag */
-  --link: #4b2fb0;
-  --focus: #5a3fc0;
+  --text: #1b2238;
+  --text-2: #3d4660;
+  --border: #737c94;   /* fältkanter, minst 3:1 */
+  --line: #efe8dc;     /* avdelare, bara dekor */
+  --select: #fff0d9;   /* markerat förslag, hovring */
+  --link: #1c3f9e;
+  --focus: #2353c8;
 
-  --accent: #cdbdf5;
-  --accent-hover: #bba6f0;
-  --accent-border: #6b55bf;
-  --on-accent: #1c1a2b;
+  --accent: #ffc58a;   /* aprikos */
+  --accent-hover: #ffb46b;
+  --accent-border: #a8591a;
+  --on-accent: #3a1d00;
 
   --error-bg: #ffe1e4;
   --error-text: #7a1426;
@@ -38,7 +50,13 @@
   --warning-text: #5a4100;
   --warning-border: #8f6e10;
 
-  --logo-bg: transparent;
+  /* Loggan är gjord för vit bakgrund och står därför alltid på ett vitt kort. */
+  --logo-card-bg: #ffffff;
+  --logo-card-text: #3d4660;
+
+  --card-border: #f1e9dc;
+  --shadow: 0 1px 2px rgb(27 34 56 / 0.06), 0 10px 30px rgb(27 34 56 / 0.08);
+  --shadow-lift: 0 2px 4px rgb(27 34 56 / 0.08), 0 16px 40px rgb(27 34 56 / 0.12);
 
   /* Temperaturetiketter: pastell med mörk text, samma i båda lägena. */
   --t-frost-bg: #dcd6ff; --t-frost-ink: #2b1f70;  /* ≤ −10° */
@@ -48,7 +66,8 @@
   --t-warm-bg:  #ffddc4; --t-warm-ink:  #6b2c05;  /* < 25° */
   --t-hot-bg:   #ffd0da; --t-hot-ink:   #701433;  /* ≥ 25° */
 
-  --radius: 14px;
+  --radius: 20px;
+  --radius-sm: 16px;
   --font: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -56,20 +75,23 @@
   :root {
     color-scheme: dark;
 
-    --bg: #14131c;
-    --surface: #1e1c29;
-    --text: #f2effa;
-    --text-2: #c4bfd6;
-    --border: #8c86a6;
-    --line: #2e2b3d;
-    --select: #2d2840;
-    --link: #cdbdf5;
-    --focus: #f4d88a;
+    /* Sommarnatt */
+    --sky: #1c2446;
+    --bg: #11162a;
+    --glow: #3b2a44;   /* skymningsglöd */
+    --surface: #1b2138;
+    --text: #f4f1ea;
+    --text-2: #c5c9d8;
+    --border: #8a91aa;
+    --line: #2a3150;
+    --select: #2a3150;
+    --link: #ffc58a;
+    --focus: #ffd36b;
 
-    --accent: #cdbdf5;
-    --accent-hover: #ddd2f8;
-    --accent-border: #cdbdf5;
-    --on-accent: #1c1a2b;
+    --accent: #ffc58a;
+    --accent-hover: #ffd3a6;
+    --accent-border: #ffc58a;
+    --on-accent: #3a1d00;
 
     --error-bg: #3a1c24;
     --error-text: #ffc9d1;
@@ -78,8 +100,40 @@
     --warning-text: #fbe4a0;
     --warning-border: #c9a43a;
 
-    --logo-bg: #f6f3fb;
+    --card-border: #262d48;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 12px 32px rgb(0 0 0 / 0.3);
+    --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.4), 0 18px 44px rgb(0 0 0 / 0.4);
   }
+}
+
+/*
+ * Himlen speglar temperaturen på platsen man sökt på (app.js sätter
+ * data-climate med samma nivåer som temperaturetiketterna). Utan sökning
+ * gäller "mild", alltså grundfärgerna ovan. Hetta visas med en varmare och
+ * större himmel, inte ett mörkare (dag) eller ljusare (natt) sken – texten
+ * ska klara 7:1 mot alla nivåer.
+ */
+@media (prefers-color-scheme: light) {
+  :root[data-climate="frost"] { --sky: #d3e3ff; --bg: #eef3ff; --glow: #e2dcff; }
+  :root[data-climate="cold"]  { --sky: #d8e8ff; --bg: #f1f6ff; --glow: #e0ecff; }
+  :root[data-climate="cool"]  { --sky: #d9eefc; --bg: #f3f8f9; --glow: #dcf2ea; }
+  :root[data-climate="warm"]  { --sky: #e4f0fb; --bg: #fff3e3; --glow: #ffdcb3; --glow-size: 560px; }
+  :root[data-climate="hot"]   { --sky: #ffe3cc; --bg: #fff1e2; --glow: #ffdbb3; --glow-size: 700px; }
+}
+
+/* Natt: iskall blå när det är kallt, ljum rosa och glödande när det är varmt – men alltid mörk. */
+@media (prefers-color-scheme: dark) {
+  :root[data-climate="frost"] { --sky: #14264c; --bg: #0c1527; --glow: #1d3557; }
+  :root[data-climate="cold"]  { --sky: #182749; --bg: #0e1629; --glow: #213453; }
+  :root[data-climate="cool"]  { --sky: #192845; --bg: #0f1829; --glow: #1b3a40; }
+  :root[data-climate="warm"]  { --sky: #262043; --bg: #14152a; --glow: #4a2b40; --glow-size: 560px; }
+  :root[data-climate="hot"]   { --sky: #2f1e3a; --bg: #17132a; --glow: #4f2c2c; --glow-size: 700px; }
+}
+
+:root { transition: --sky 0.9s ease, --bg 0.9s ease, --glow 0.9s ease, --glow-size 0.9s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root { transition: none; }
 }
 
 /* Den som bett om mer kontrast får helt kontrastrik sekundärtext och kanter. */
@@ -107,7 +161,18 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background-color: var(--bg);
+  /*
+   * Himmel uppe till vänster, varm sand uppe till höger där solen lyser, och
+   * allt tonar ned till sand. Solen ligger bara över varma toner – solsken
+   * över blå himmel blandas annars till grått.
+   */
+  background-image:
+    radial-gradient(circle min(var(--glow-size), 75vw) at 95% -80px, var(--glow), transparent),
+    linear-gradient(180deg, transparent 260px, var(--bg) 640px),
+    linear-gradient(115deg, var(--sky) 10%, var(--bg) 70%);
+  background-size: auto, auto, 100% 640px;
+  background-repeat: no-repeat;
   color: var(--text);
   font-family: var(--font);
   font-size: 1.125rem;   /* 18 px */
@@ -141,16 +206,53 @@ h1, h2, p { margin: 0; }
 
 /* ---- Inledning ---- */
 
+/* Rubrik och ingress till vänster, huset med gubben till höger. */
+.intro {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: 1fr auto; /* rubrik och ingress tätt ihop, nertill */
+  grid-template-areas:
+    "title figure"
+    "text  figure";
+  align-items: end;
+  column-gap: 16px;
+}
+
+.intro h1 { grid-area: title; }
+.intro p { grid-area: text; }
+.buddy { grid-area: figure; }
+
 .intro h1 {
-  font-size: 2.25rem;
-  font-weight: 750;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
+  font-size: 2.5rem;
+  font-weight: 780;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
 }
 
 .intro p {
   margin-top: 8px;
   color: var(--text-2);
+}
+
+/*
+ * Gubben på väg ut genom dörren till ett falu rött hus, klädd efter
+ * temperaturen. Det varma ljuset inomhus bakom honom gör att kläderna syns
+ * tydligt i båda lägena.
+ */
+.buddy { margin: 0; }
+
+.figure {
+  display: block;
+  width: 170px;
+  height: 202px;
+  filter: drop-shadow(0 10px 16px rgb(27 34 56 / 0.18));
+}
+
+.figure [data-item] { transition: opacity 0.35s ease; }
+.figure [data-off] { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .figure [data-item] { transition: none; }
 }
 
 /* ---- Sökfält ---- */
@@ -176,7 +278,8 @@ h1, h2, p { margin: 0; }
   color: var(--text);
   background: var(--surface);
   border: 2px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
 }
 
 .search input::placeholder {
@@ -199,11 +302,13 @@ h1, h2, p { margin: 0; }
   color: var(--on-accent);
   background: var(--accent);
   border: 2px solid var(--accent-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
   cursor: pointer;
 }
 
 .search button:hover { background: var(--accent-hover); }
+.search button:active { transform: translateY(1px); }
 
 /* ---- Förslag ---- */
 
@@ -220,8 +325,8 @@ h1, h2, p { margin: 0; }
   list-style: none;
   background: var(--surface);
   border: 2px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 16px 40px rgb(0 0 0 / 0.14);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lift);
 }
 
 .suggestions li {
@@ -264,7 +369,7 @@ h1, h2, p { margin: 0; }
   padding: 12px 16px;
   color: var(--error-text);
   background: var(--error-bg);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
 }
 
 .did-you-mean { margin-top: 8px; }
@@ -276,7 +381,7 @@ h1, h2, p { margin: 0; }
   color: var(--warning-text);
   background: var(--warning-bg);
   border: 2px solid var(--warning-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
 }
 
 .notice strong { display: block; }
@@ -295,13 +400,33 @@ h1, h2, p { margin: 0; }
 }
 
 .summary {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 20px 22px;
+  padding: 26px 24px 22px;
   background: var(--surface);
+  border: 1px solid var(--card-border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
+
+/* En list upptill i samma färg som temperaturen. */
+.summary::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 8px;
+  background: var(--level, var(--line));
+}
+
+.summary[data-level="frost"] { --level: var(--t-frost-bg); }
+.summary[data-level="cold"]  { --level: var(--t-cold-bg); }
+.summary[data-level="cool"]  { --level: var(--t-cool-bg); }
+.summary[data-level="mild"]  { --level: var(--t-mild-bg); }
+.summary[data-level="warm"]  { --level: var(--t-warm-bg); }
+.summary[data-level="hot"]   { --level: var(--t-hot-bg); }
 
 .summary > div { flex: 1; min-width: 0; }
 
@@ -333,11 +458,13 @@ h1, h2, p { margin: 0; }
 }
 
 .stations {
-  margin: 12px 0 0;
+  margin: 16px 0 0;
   padding: 0;
   list-style: none;
   background: var(--surface);
+  border: 1px solid var(--card-border);
   border-radius: var(--radius);
+  box-shadow: var(--shadow);
   overflow: hidden;
 }
 
@@ -427,35 +554,32 @@ h1, h2, p { margin: 0; }
 /* ---- Källhänvisning ---- */
 
 .source {
-  padding: 24px 16px 40px;
+  padding: 32px 16px 48px;
   text-align: center;
 }
 
+/* Ett vitt kort i båda lägena, eftersom loggan är gjord för vit bakgrund. */
 .source a {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   min-height: 48px;
-  padding: 8px 16px;
-  color: var(--text-2);
+  padding: 12px 22px;
+  color: var(--logo-card-text);
   font-size: 1rem;
   text-decoration: none;
-  border-radius: 12px;
+  background: var(--logo-card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
 }
 
+.source a:hover { box-shadow: var(--shadow-lift); }
 .source a:hover span { text-decoration: underline; }
-
-/* Loggan har mörkblå text, så i mörkt läge får den en ljus platta. */
-.source .logo {
-  display: flex;
-  padding: 6px 10px;
-  background: var(--logo-bg);
-  border-radius: 8px;
-}
 
 .source img {
   display: block;
-  height: 26px;
+  height: 36px;
   width: auto;
 }
 
@@ -466,6 +590,17 @@ h1, h2, p { margin: 0; }
   .stations a, .summary { padding-left: 16px; padding-right: 16px; }
   .temp { min-width: 4.2em; padding: 4px 10px; }
   .temp-lg { font-size: 1.75rem; }
+  /* Smalt: bara rubriken bredvid huset, ingressen över hela bredden. */
+  .intro {
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      "title figure"
+      "text  text";
+    align-items: center;
+  }
+  .intro h1 { font-size: 1.9rem; }
+  .figure { width: 112px; height: 133px; }
+  .source img { height: 30px; }
 }
 
 /* ---- Windows kontrastläge ---- */

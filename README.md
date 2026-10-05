@@ -1,6 +1,6 @@
-# Temperatur
+# Vad ska jag ha för kläder?
 
-Sök en ort och se aktuell temperatur från mätpunkterna där. Data från [temperatur.nu](https://www.temperatur.nu/).
+Sök en ort och se aktuell temperatur från mätpunkterna där – och en gubbe som visar vad man ska ha på sig. Data från [temperatur.nu](https://www.temperatur.nu/).
 
 ## Köra lokalt
 

@@ -23,22 +23,34 @@ func TestColorContrast(t *testing.T) {
 		min    float64
 	}
 	pairs := []pair{
-		{"text", "bg", 7}, {"text", "surface", 7}, {"text", "select", 7},
-		{"text-2", "bg", 7}, {"text-2", "surface", 7}, {"text-2", "select", 7},
-		{"link", "bg", 7}, {"link", "surface", 7},
+		// Sidans bakgrund är en gradient från --sky till --bg med solsken
+		// (--glow); texten ska klara alla tre.
+		{"text", "sky", 7}, {"text", "bg", 7}, {"text", "glow", 7}, {"text", "surface", 7}, {"text", "select", 7},
+		{"text-2", "sky", 7}, {"text-2", "bg", 7}, {"text-2", "glow", 7}, {"text-2", "surface", 7}, {"text-2", "select", 7},
+		{"link", "sky", 7}, {"link", "bg", 7}, {"link", "surface", 7},
+		{"logo-card-text", "logo-card-bg", 7},
 		{"on-accent", "accent", 7}, {"on-accent", "accent-hover", 7},
 		{"error-text", "error-bg", 7},
 		{"warning-text", "warning-bg", 7},
 		{"warning-border", "bg", 3},
-		{"border", "bg", 3}, {"border", "surface", 3},
-		{"focus", "bg", 3}, {"focus", "surface", 3}, {"focus", "select", 3},
-		{"accent-border", "bg", 3},
+		{"warning-border", "sky", 3},
+		{"border", "sky", 3}, {"border", "bg", 3}, {"border", "glow", 3}, {"border", "surface", 3},
+		{"focus", "sky", 3}, {"focus", "bg", 3}, {"focus", "glow", 3}, {"focus", "surface", 3}, {"focus", "select", 3},
+		{"accent-border", "sky", 3}, {"accent-border", "bg", 3}, {"accent-border", "glow", 3},
 	}
 	for _, level := range []string{"frost", "cold", "cool", "mild", "warm", "hot"} {
 		pairs = append(pairs, pair{"t-" + level + "-ink", "t-" + level + "-bg", 7})
 	}
 
-	for name, theme := range map[string]map[string]string{"ljust": light, "mörkt": dark} {
+	all := map[string]map[string]string{"ljust": light, "mörkt": dark}
+	for name, theme := range climates(light, dark, string(css)) {
+		all[name] = theme
+	}
+	if len(all) < 12 {
+		t.Fatalf("hittade bara %d teman, vill ha ljust och mörkt med fem temperaturnivåer vardera", len(all))
+	}
+
+	for name, theme := range all {
 		for _, p := range pairs {
 			fg, okFg := theme[p.fg]
 			bg, okBg := theme[p.bg]
@@ -54,9 +66,35 @@ func TestColorContrast(t *testing.T) {
 }
 
 var (
-	colorVar  = regexp.MustCompile(`--([a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\b`)
-	darkBlock = regexp.MustCompile(`(?s)@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{(.*?)\}`)
+	colorVar     = regexp.MustCompile(`--([a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\b`)
+	climateBlock = regexp.MustCompile(`:root\[data-climate="([a-z]+)"\]\s*\{([^}]*)\}`)
+	schemeBlock  = regexp.MustCompile(`(?s)@media \(prefers-color-scheme: (light|dark)\)\s*\{(.*?)\n\}`)
+	darkBlock    = regexp.MustCompile(`(?s)@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{(.*?)\}`)
 )
+
+// climates läser himmelsfärgerna per temperaturnivå, för ljust och mörkt
+// läge, och lägger dem över respektive grundfärger. Namnen blir t.ex.
+// "ljust/hot" och "mörkt/frost".
+func climates(light, dark map[string]string, css string) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for _, block := range schemeBlock.FindAllStringSubmatch(css, -1) {
+		base, prefix := light, "ljust/"
+		if block[1] == "dark" {
+			base, prefix = dark, "mörkt/"
+		}
+		for _, m := range climateBlock.FindAllStringSubmatch(block[2], -1) {
+			theme := map[string]string{}
+			for k, v := range base {
+				theme[k] = v
+			}
+			for k, v := range vars(m[2]) {
+				theme[k] = v
+			}
+			out[prefix+m[1]] = theme
+		}
+	}
+	return out
+}
 
 // themes läser färgvariablerna i första :root-blocket (ljust) och i blocket
 // för mörkt läge, som skriver över de ljusa.
