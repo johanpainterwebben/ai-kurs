@@ -13,6 +13,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"temperatur/internal/places"
@@ -110,8 +111,13 @@ func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
 }
 
 // query läser och normaliserar q-parametern och kontrollerar längden.
+// Styrtecken (t.ex. NUL) hör aldrig hemma i ett ortnamn och avvisas, så att
+// de inte når loggar eller annan kod.
 func query(r *http.Request) (string, bool) {
 	q := strings.Join(strings.Fields(r.URL.Query().Get("q")), " ")
+	if strings.IndexFunc(q, unicode.IsControl) >= 0 || !utf8.ValidString(q) {
+		return "", false
+	}
 	n := utf8.RuneCountInString(q)
 	return q, n >= minQueryLen && n <= maxQueryLen
 }

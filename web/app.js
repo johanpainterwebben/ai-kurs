@@ -14,6 +14,7 @@ const list = document.getElementById("stations");
 const tempFormat = new Intl.NumberFormat("sv-SE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const timeFormat = new Intl.DateTimeFormat("sv-SE", { hour: "2-digit", minute: "2-digit" });
 const dateFormat = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short" });
+const stockholmDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" });
 
 let searchController = null;
 let suggestions = [];
@@ -21,6 +22,7 @@ let activeIndex = -1;
 let suggestTimer = 0;
 let suggestController = null;
 const suggestCache = new Map();
+const SUGGEST_CACHE_MAX = 200;
 
 // ---- Sökning ----
 
@@ -328,6 +330,9 @@ async function fetchSuggestions(q) {
     const res = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`, { signal: suggestController.signal });
     if (!res.ok) return;
     const data = await res.json();
+    if (suggestCache.size >= SUGGEST_CACHE_MAX) {
+      suggestCache.delete(suggestCache.keys().next().value); // äldsta först
+    }
     suggestCache.set(key, data.suggestions);
     // Användaren kan ha skrivit vidare medan svaret var på väg.
     if (input.value.trim().toLowerCase() === key) showSuggestions(data.suggestions);
@@ -434,7 +439,7 @@ function formatUpdated(s) {
   if (!s) return "";
   const [date, time = ""] = s.split(" ");
   const hhmm = time.slice(0, 5);
-  const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" }).format(new Date());
+  const today = stockholmDate.format(new Date());
   return date === today ? `kl. ${hhmm}` : `${date} ${hhmm}`;
 }
 

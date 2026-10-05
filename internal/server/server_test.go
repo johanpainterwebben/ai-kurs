@@ -126,7 +126,7 @@ func TestSearchReportsStaleData(t *testing.T) {
 
 func TestValidation(t *testing.T) {
 	h, src := newTestServer(t, nil)
-	for _, q := range []string{"", " a ", strings.Repeat("a", 51)} {
+	for _, q := range []string{"", " a ", strings.Repeat("a", 51), "\x00\x00", "lu\x07nd", "lund\xff"} {
 		if code, _ := get[map[string]string](t, h, "/api/search", q); code != http.StatusBadRequest {
 			t.Errorf("search %q: status %d, vill ha 400", q, code)
 		}
