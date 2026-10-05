@@ -93,6 +93,26 @@ func TestSearchDidYouMean(t *testing.T) {
 	}
 }
 
+type staleIndex struct{ *places.Index }
+
+func (staleIndex) Stale() bool { return true }
+
+func TestSearchReportsStaleData(t *testing.T) {
+	h, _ := newTestServer(t, nil)
+	if _, body := get[searchResponse](t, h, "/api/search", "Lund"); body.Stale {
+		t.Fatal("stale ska vara false när hämtningarna fungerar")
+	}
+
+	mock, _ := tnu.NewMock()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	idx := staleIndex{places.NewIndex(mock, 5*time.Minute, log)}
+	h = New(idx, fstest.MapFS{}, log).Handler()
+	code, body := get[searchResponse](t, h, "/api/search", "Lund")
+	if code != http.StatusOK || !body.Stale || body.Total != 10 {
+		t.Fatalf("status %d, stale=%v, total=%d; vill ha 200, true, 10", code, body.Stale, body.Total)
+	}
+}
+
 func TestValidation(t *testing.T) {
 	h, src := newTestServer(t, nil)
 	for _, q := range []string{"", " a ", strings.Repeat("a", 51)} {

@@ -34,6 +34,10 @@
   --error-bg: #ffe1e4;
   --error-text: #7a1426;
 
+  --warning-bg: #fff1c4;
+  --warning-text: #5a4100;
+  --warning-border: #8f6e10;
+
   --logo-bg: transparent;
 
   /* Temperaturetiketter: pastell med mörk text, samma i båda lägena. */
@@ -69,6 +73,10 @@
 
     --error-bg: #3a1c24;
     --error-text: #ffc9d1;
+
+    --warning-bg: #362d12;
+    --warning-text: #fbe4a0;
+    --warning-border: #c9a43a;
 
     --logo-bg: #f6f3fb;
   }
@@ -261,6 +269,18 @@ h1, h2, p { margin: 0; }
 
 .did-you-mean { margin-top: 8px; }
 
+/* Visas när flera hämtningar i rad har misslyckats och datan kan vara gammal. */
+.notice {
+  margin-bottom: 12px;
+  padding: 14px 18px;
+  color: var(--warning-text);
+  background: var(--warning-bg);
+  border: 2px solid var(--warning-border);
+  border-radius: var(--radius);
+}
+
+.notice strong { display: block; }
+
 .did-you-mean button {
   padding: 2px 0;
   font: inherit;
@@ -298,6 +318,18 @@ h1, h2, p { margin: 0; }
   margin-top: 6px;
   color: var(--text-2);
   font-size: 1rem;
+}
+
+/* Länk till mätpunkten när resultatet bara är en mätpunkt och listan inte visas. */
+.summary-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--link);
+  font-size: 1rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
 }
 
 .stations {
@@ -376,9 +408,20 @@ h1, h2, p { margin: 0; }
 .temp-hot   { background: var(--t-hot-bg);   color: var(--t-hot-ink); }
 
 .temp-missing {
-  color: var(--text-2);
+  font-size: 1rem;
   font-weight: 400;
-  border-color: var(--line);
+  color: var(--text-2);
+  border: 2px dashed var(--border);
+}
+
+/*
+ * Mätpunkter utan värde sorteras sist och tonas ned med grått, tunnare namn
+ * och streckad etikett. Ingen opacity – texten ska fortfarande klara 7:1
+ * (text-2 mot surface är kontrasttestad).
+ */
+.stations li.no-value .station-title {
+  font-weight: 400;
+  color: var(--text-2);
 }
 
 /* ---- Källhänvisning ---- */

@@ -19,20 +19,38 @@ type Snapshot struct {
 	places   []place
 }
 
-// Place är en plats man kan söka på: en kommun eller en ort.
+// Place är en plats man kan söka på: en kommun, en ort eller en plats inom en
+// ort (delen efter snedstrecket i "Lund/Tre Högars väg").
 type Place struct {
-	Label  string `json:"label"`  // det som visas och söks på, t.ex. "Bälinge"
-	Detail string `json:"detail"` // län för kommuner, kommun för orter
-	Kind   string `json:"kind"`   // "kommun" eller "ort"
+	Label  string `json:"label"`  // det som visas, t.ex. "Tre Högars väg"
+	Query  string `json:"query"`  // det som söks på för exakt denna plats, t.ex. "Lund/Tre Högars väg"
+	Detail string `json:"detail"` // län för kommuner, kommun för orter, ort och kommun för platser
+	Kind   string `json:"kind"`   // "kommun", "ort" eller "plats"
 	Count  int    `json:"count"`  // antal mätpunkter
 }
 
 type place struct {
 	Place
-	names      []string // vikta namn som räknas som exakt träff
-	key        []rune   // vikt namn för förslag, inklusive alias
+	names    []string // vikta namn som räknas som exakt träff
+	full     matchKey // hela namnet, t.ex. "lund tre hogars vag"
+	own      matchKey // för platser bara platsens namn, t.ex. "tre hogars vag"
+	stations []int    // index i Snapshot.stations
+}
+
+// matchKey är ett vikt namn (med alias) förberett för matchning.
+type matchKey struct {
+	runes      []rune
 	wordStarts []int
-	stations   []int // index i Snapshot.stations
+}
+
+func newMatchKey(s string) matchKey {
+	k := matchKey{runes: []rune(withAliases(fold(s))), wordStarts: []int{0}}
+	for i, r := range k.runes {
+		if r == ' ' {
+			k.wordStarts = append(k.wordStarts, i+1)
+		}
+	}
+	return k
 }
 
 // SearchResult är mätpunkterna på den plats en sökning ledde till.
@@ -94,32 +112,68 @@ func kommunNames(label string) []string {
 // "Bollnäs 2", "Lysekil2", "Mölnbo (VV)", "Sigtuna vv".
 var ortSuffix = regexp.MustCompile(`(?i)\s*(\d+|\(.*\)|\bvv)\s*$`)
 
+// splitTitle delar en mätpunkts namn i ort och plats inom orten, utan
+// tillägg: "Luleå/Hertsön 2" → "Luleå", "Hertsön". Plats är tom om namnet
+// saknar snedstreck.
+func splitTitle(title string) (ort, plats string) {
+	ort, plats, _ = strings.Cut(title, "/")
+	clean := func(s string) string { return strings.TrimSpace(ortSuffix.ReplaceAllString(s, "")) }
+	return clean(ort), clean(plats)
+}
+
 // ortName är ortdelen av en mätpunkts namn: "Lund/Värpinge" → "Lund".
 func ortName(title string) string {
-	ort, _, _ := strings.Cut(title, "/")
-	return strings.TrimSpace(ortSuffix.ReplaceAllString(ort, ""))
+	ort, _ := splitTitle(title)
+	return ort
 }
 
 func newSnapshot(stations []tnu.Station, fetchedAt time.Time) *Snapshot {
 	kommuner := map[string]*place{}
 	orter := map[string]*place{}
+	platser := map[string]*place{}
+	group := func(m map[string]*place, key string, i int, create func() *place) {
+		p := m[key]
+		if p == nil {
+			p = create()
+			m[key] = p
+		}
+		p.stations = append(p.stations, i)
+	}
+
 	for i, st := range stations {
 		if st.Kommun != "" {
-			p := kommuner[st.Kommun]
-			if p == nil {
-				p = &place{Place: Place{Label: st.Kommun, Detail: st.Lan, Kind: "kommun"}, names: kommunNames(st.Kommun)}
-				kommuner[st.Kommun] = p
-			}
-			p.stations = append(p.stations, i)
+			group(kommuner, st.Kommun, i, func() *place {
+				return &place{Place: Place{Label: st.Kommun, Detail: st.Lan, Kind: "kommun"}, names: kommunNames(st.Kommun)}
+			})
 		}
-		if ort := ortName(st.Title); ort != "" {
-			k := fold(ort)
-			p := orter[k]
-			if p == nil {
-				p = &place{Place: Place{Label: ort, Kind: "ort"}, names: []string{k}}
-				orter[k] = p
-			}
-			p.stations = append(p.stations, i)
+		ort, plats := splitTitle(st.Title)
+		if ort != "" {
+			group(orter, fold(ort), i, func() *place {
+				return &place{Place: Place{Label: ort, Kind: "ort"}, names: []string{fold(ort)}}
+			})
+		}
+		if ort != "" && plats != "" {
+			q := ort + "/" + plats
+			group(platser, fold(q), i, func() *place {
+				return &place{Place: Place{Label: plats, Query: q, Kind: "plats"}, names: []string{fold(q)}}
+			})
+		}
+	}
+
+	// sameAsKommun anger att orten heter som kommunen den ligger i ("Lund" i
+	// Lunds kommun). För besökaren är det samma plats.
+	sameAsKommun := func(ort, kommun string) bool {
+		k := kommuner[kommun]
+		return k != nil && slices.Contains(k.names, fold(ort))
+	}
+
+	// En plats med samma namn som en ort i samma kommun är samma ställe
+	// ("Norrköping/Svärtinge" och orten Svärtinge); lägg den till orten.
+	for k, p := range platser {
+		kommun := stations[p.stations[0]].Kommun
+		if o := orter[fold(p.Label)]; o != nil && onlyInKommun(stations, o.stations, kommun) {
+			o.stations = append(o.stations, p.stations...)
+			delete(platser, k)
 		}
 	}
 
@@ -134,10 +188,8 @@ func newSnapshot(stations []tnu.Station, fetchedAt time.Time) *Snapshot {
 		}
 		if len(ks) == 1 {
 			p.Detail = stations[p.stations[0]].Kommun
-			// En ort som har samma namn som kommunen den ligger i är samma
-			// plats för besökaren ("Lund" och "Lunds kommun"); visa bara kommunen.
-			if k := kommuner[p.Detail]; k != nil && slices.Contains(k.names, p.names[0]) {
-				continue
+			if sameAsKommun(p.Label, p.Detail) {
+				continue // visa bara kommunen
 			}
 		} else {
 			p.Detail = "flera kommuner"
@@ -145,25 +197,68 @@ func newSnapshot(stations []tnu.Station, fetchedAt time.Time) *Snapshot {
 		s.places = append(s.places, *p)
 	}
 
+	// Ett delnamn som bara finns på ett ställe ("Tre Högars väg") räcker som
+	// exakt sökning; vanliga som "Centrum" kräver orten ("Alfta/Centrum").
+	subCount := map[string]int{}
+	for _, p := range platser {
+		subCount[fold(p.Label)]++
+	}
+	for _, p := range platser {
+		if subCount[fold(p.Label)] == 1 {
+			p.names = append(p.names, fold(p.Label))
+		}
+		st := stations[p.stations[0]]
+		ort, _ := splitTitle(st.Title)
+		p.Detail = st.Kommun
+		if !sameAsKommun(ort, st.Kommun) {
+			p.Detail = ort + " · " + st.Kommun
+		}
+		s.places = append(s.places, *p)
+	}
+
 	for i := range s.places {
 		p := &s.places[i]
-		p.Count = len(p.stations)
-		p.key = []rune(withAliases(fold(p.Label)))
-		p.wordStarts = []int{0}
-		for j, r := range p.key {
-			if r == ' ' {
-				p.wordStarts = append(p.wordStarts, j+1)
-			}
+		if p.Query == "" {
+			p.Query = p.Label
 		}
+		slices.SortStableFunc(p.stations, func(a, b int) int { return byTempDesc(stations[a], stations[b]) })
+		p.Count = len(p.stations)
+		p.full = newMatchKey(p.Query)
+		p.own = newMatchKey(p.Label)
 	}
 	slices.SortFunc(s.places, func(a, b place) int {
-		return cmp.Or(cmp.Compare(kindOrder(a.Kind), kindOrder(b.Kind)), cmp.Compare(a.Label, b.Label))
+		return cmp.Or(cmp.Compare(kindOrder(a.Kind), kindOrder(b.Kind)), cmp.Compare(a.Query, b.Query))
 	})
 	return s
 }
 
+// onlyInKommun anger att alla mätpunkterna ligger i kommunen.
+func onlyInKommun(stations []tnu.Station, idx []int, kommun string) bool {
+	for _, i := range idx {
+		if stations[i].Kommun != kommun {
+			return false
+		}
+	}
+	return true
+}
+
+// byTempDesc sorterar varmast först och mätpunkter utan värde sist.
+// Lika temperaturer behåller API:ets ordning, som är alfabetisk.
+func byTempDesc(a, b tnu.Station) int {
+	switch {
+	case a.Temp == nil && b.Temp == nil:
+		return 0
+	case a.Temp == nil:
+		return 1
+	case b.Temp == nil:
+		return -1
+	}
+	return cmp.Compare(*b.Temp, *a.Temp)
+}
+
 // Search tar fram den plats frågan avser och returnerar dess mätpunkter,
-// högst limit stycken. Total och Average gäller alla platsens mätpunkter.
+// varmast först och de utan värde sist, högst limit stycken. Total och
+// Average gäller alla platsens mätpunkter.
 //
 // Platsen är i första hand en med exakt det namnet ("Lund" ger Lunds kommun),
 // annars det bästa förslaget om det inte bygger på en felstavning – då
@@ -200,16 +295,23 @@ func (s *Snapshot) resolve(query string) *place {
 	if q == "" {
 		return nil
 	}
-	// places är sorterad med kommuner först, så de vinner vid samma namn.
+	// places är sorterad med kommuner först och platser sist, så den
+	// större platsen vinner vid samma namn.
 	for i := range s.places {
 		if slices.Contains(s.places[i].names, q) {
 			return &s.places[i]
 		}
 	}
-	if hits := s.rank(q); len(hits) > 0 && hits[0].score <= scoreContains {
-		return hits[0].p
+	hits := s.rank(q)
+	if len(hits) == 0 || hits[0].fuzzy {
+		return nil
 	}
-	return nil
+	// Flera lika bra träffar med samma namn ("centrum") – gissa inte, låt
+	// besökaren välja bland förslagen.
+	if len(hits) > 1 && hits[1].score == hits[0].score && fold(hits[1].p.Label) == fold(hits[0].p.Label) {
+		return nil
+	}
+	return hits[0].p
 }
 
 // Suggest returnerar de platser som bäst matchar det som skrivits hittills.
@@ -226,6 +328,7 @@ func (s *Snapshot) Suggest(query string, limit int) []Place {
 type hit struct {
 	p     *place
 	score int
+	fuzzy bool // bygger på en felstavning
 }
 
 // rank returnerar alla platser som matchar den vikta frågan q, bäst först.
@@ -238,12 +341,10 @@ func (s *Snapshot) rank(q string) []hit {
 	var hits []hit
 	for i := range s.places {
 		p := &s.places[i]
-		score, ok := matchScore(qr, p.key, p.wordStarts, typos)
 		if slices.Contains(p.names, q) {
-			score, ok = scoreExact, true
-		}
-		if ok {
-			hits = append(hits, hit{p, score})
+			hits = append(hits, hit{p, scoreExact, false})
+		} else if score, fuzzy, ok := p.match(qr, typos); ok {
+			hits = append(hits, hit{p, score, fuzzy})
 		}
 	}
 	slices.SortFunc(hits, func(a, b hit) int {
@@ -251,17 +352,40 @@ func (s *Snapshot) rank(q string) []hit {
 			cmp.Compare(a.score, b.score),
 			cmp.Compare(kindOrder(a.p.Kind), kindOrder(b.p.Kind)),
 			cmp.Compare(b.p.Count, a.p.Count),
-			cmp.Compare(a.p.Label, b.p.Label),
+			cmp.Compare(a.p.Query, b.p.Query),
 		)
 	})
 	return hits
 }
 
-func kindOrder(kind string) int {
-	if kind == "kommun" {
-		return 0
+// match jämför q med platsens namn. En plats inom en ort ("Lund/Tre Högars
+// väg") matchas i första hand på sitt eget namn. Matchar q bara via orten
+// ("lund", "stockholm") hamnar den efter kommuner och orter, så att de inte
+// trängs undan av alla platser i orten.
+func (p *place) match(q []rune, typos int) (score int, fuzzy, ok bool) {
+	if p.Kind == "plats" {
+		if score, ok := matchScore(q, p.own, typos); ok {
+			return score, score > scoreContains, true
+		}
+		if score, ok := matchScore(q, p.full, typos); ok {
+			return score + scoreViaOrt, score > scoreContains, true
+		}
+		return 0, false, false
 	}
-	return 1
+	score, ok = matchScore(q, p.full, typos)
+	return score, score > scoreContains, ok
+}
+
+// kindOrder ger kommuner företräde framför orter, och orter framför platser.
+func kindOrder(kind string) int {
+	switch kind {
+	case "kommun":
+		return 0
+	case "ort":
+		return 1
+	default:
+		return 2
+	}
 }
 
 // maxTypos är hur många skrivfel som tillåts för en fråga av given längd.
@@ -283,11 +407,14 @@ const (
 	scoreWord     = 1  // början av ett ord i namnet
 	scoreContains = 2  // någonstans i namnet
 	// scoreContains + n = början av namnet eller ett ord med n skrivfel
+
+	// scoreViaOrt läggs till för en plats som bara matchar via sin ort.
+	scoreViaOrt = 3
 )
 
 // matchScore rangordnar hur väl q matchar key, se konstanterna ovan.
-func matchScore(q, key []rune, wordStarts []int, typos int) (int, bool) {
-	qs, ks := string(q), string(key)
+func matchScore(q []rune, k matchKey, typos int) (int, bool) {
+	qs, ks := string(q), string(k.runes)
 	switch {
 	case strings.HasPrefix(ks, qs):
 		return scorePrefix, true
@@ -299,8 +426,8 @@ func matchScore(q, key []rune, wordStarts []int, typos int) (int, bool) {
 		return 0, false
 	}
 	best := typos + 1
-	for _, start := range wordStarts {
-		best = min(best, prefixDistance(q, key[start:]))
+	for _, start := range k.wordStarts {
+		best = min(best, prefixDistance(q, k.runes[start:]))
 	}
 	if best > typos {
 		return 0, false

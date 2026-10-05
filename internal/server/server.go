@@ -28,6 +28,7 @@ type searchResponse struct {
 	Query string `json:"query"`
 	places.SearchResult
 	FetchedAt  time.Time      `json:"fetchedAt"`  // när listan hämtades från temperatur.nu
+	Stale      bool           `json:"stale"`      // flera hämtningar i rad har misslyckats
 	DidYouMean []places.Place `json:"didYouMean"` // förslag när ingen plats hittades
 }
 
@@ -35,15 +36,21 @@ type suggestResponse struct {
 	Suggestions []places.Place `json:"suggestions"`
 }
 
+// Index är det servern behöver från places.Index.
+type Index interface {
+	Get(ctx context.Context) (*places.Snapshot, error)
+	Stale() bool
+}
+
 // Server håller beroendena för HTTP-hanterarna.
 type Server struct {
-	index  *places.Index
+	index  Index
 	static fs.FS
 	log    *slog.Logger
 }
 
 // New skapar en server.
-func New(index *places.Index, static fs.FS, log *slog.Logger) *Server {
+func New(index Index, static fs.FS, log *slog.Logger) *Server {
 	return &Server{index: index, static: static, log: log}
 }
 
@@ -71,6 +78,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		Query:        q,
 		SearchResult: snap.Search(q, maxStations),
 		FetchedAt:    snap.FetchedAt.UTC(),
+		Stale:        s.index.Stale(),
 		DidYouMean:   []places.Place{},
 	}
 	if res.Place == nil {

@@ -15,9 +15,14 @@ import (
 	"temperatur/internal/tnu"
 )
 
+// StaleAfterFailures är hur många misslyckade hämtningar i rad som tolereras
+// innan listan räknas som inaktuell (se Stale).
+const StaleAfterFailures = 3
+
 // Index håller den senast hämtade listan. Run förnyar den i bakgrunden.
-// Ett nytt försök görs aldrig tidigare än ett intervall efter det förra,
-// inte heller efter fel – det är API-villkorets femminutersregel.
+// Misslyckas en hämtning behålls den förra listan. Ett nytt försök görs
+// aldrig tidigare än ett intervall efter det förra, inte heller efter fel –
+// det är API-villkorets femminutersregel.
 type Index struct {
 	src      tnu.Source
 	interval time.Duration
@@ -29,6 +34,7 @@ type Index struct {
 	snap        *Snapshot
 	lastAttempt time.Time
 	lastErr     error
+	failures    int           // misslyckade hämtningar i rad
 	refreshing  chan struct{} // icke-nil medan en hämtning pågår
 }
 
@@ -85,6 +91,14 @@ func (x *Index) Get(ctx context.Context) (*Snapshot, error) {
 	return nil, x.lastErr
 }
 
+// Stale anger att fler än StaleAfterFailures hämtningar i rad har misslyckats,
+// så att listan kan vara inaktuell. Nollställs vid nästa lyckade hämtning.
+func (x *Index) Stale() bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	return x.failures > StaleAfterFailures
+}
+
 // refreshIfDue startar en hämtning om ingen pågår och intervallet sedan
 // förra försöket har gått. Returnerar den pågående hämtningens kanal, som
 // stängs när den är klar, eller nil om ingen hämtning pågår.
@@ -115,7 +129,16 @@ func (x *Index) refresh(done chan struct{}) {
 
 	x.mu.Lock()
 	if snap != nil {
-		x.snap = snap
+		x.snap = snap // en misslyckad hämtning lämnar den förra listan orörd
+		if x.failures > StaleAfterFailures {
+			x.log.Info("hämtningarna fungerar igen", "misslyckade_i_rad", x.failures)
+		}
+		x.failures = 0
+	} else {
+		x.failures++
+		if x.failures == StaleAfterFailures+1 {
+			x.log.Warn("listan räknas nu som inaktuell", "misslyckade_i_rad", x.failures)
+		}
 	}
 	x.lastErr = err
 	x.refreshing = nil

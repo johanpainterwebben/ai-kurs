@@ -79,6 +79,115 @@ func TestSearchOnlyReturnsStationsInPlace(t *testing.T) {
 	}
 }
 
+func TestSearchSortsWarmestFirstAndMissingLast(t *testing.T) {
+	s := realSnapshot(t)
+	for _, q := range []string{"Lund", "Sthlm", "Kiruna", "Göteborg"} {
+		res := s.Search(q, 100)
+		seenMissing := false
+		for i, st := range res.Stations {
+			if st.Temp == nil {
+				seenMissing = true
+				continue
+			}
+			if seenMissing {
+				t.Fatalf("%s: %s har värde men står efter en mätpunkt utan värde", q, st.Title)
+			}
+			if i > 0 && *st.Temp > *res.Stations[i-1].Temp {
+				t.Fatalf("%s: %s (%.1f) står efter %s (%.1f)", q, st.Title, *st.Temp, res.Stations[i-1].Title, *res.Stations[i-1].Temp)
+			}
+		}
+	}
+	// Lund har en mätpunkt utan värde (Dörröd); den ska stå sist.
+	lund := s.Search("Lund", 100).Stations
+	if last := lund[len(lund)-1]; last.Temp != nil {
+		t.Errorf("sista mätpunkten i Lund ska sakna värde, fick %s", last.Title)
+	}
+}
+
+func TestSearchLimitKeepsWarmest(t *testing.T) {
+	s := realSnapshot(t)
+	all := s.Search("Sthlm", 100).Stations
+	top := s.Search("Sthlm", 5).Stations
+	for i := range top {
+		if top[i].ID != all[i].ID {
+			t.Fatalf("med begränsning ska de 5 varmaste visas; plats %d är %s, vill ha %s", i, top[i].Title, all[i].Title)
+		}
+	}
+}
+
+func TestSubLocations(t *testing.T) {
+	s := realSnapshot(t)
+	tests := []struct {
+		query, label, wantQuery string
+		total                   int
+	}{
+		{"tre högars", "Tre Högars väg", "Lund/Tre Högars väg", 1},
+		{"tre hogars vag", "Tre Högars väg", "Lund/Tre Högars väg", 1},
+		{"Lund/Tre Högars väg", "Tre Högars väg", "Lund/Tre Högars väg", 1},
+		{"lund tre", "Tre Högars väg", "Lund/Tre Högars väg", 1},
+		{"Alfta/Centrum", "Centrum", "Alfta/Centrum", 1},
+		{"hertsön", "Hertsön", "Luleå/Hertsön", 2}, // "Luleå/Hertsön" och "Luleå/Hertsön 2"
+	}
+	for _, tt := range tests {
+		res := s.Search(tt.query, 100)
+		if res.Place == nil {
+			t.Errorf("Search(%q): ingen plats", tt.query)
+			continue
+		}
+		if res.Place.Kind != "plats" || res.Place.Label != tt.label || res.Place.Query != tt.wantQuery || res.Total != tt.total {
+			t.Errorf("Search(%q) = %+v (%d st), vill ha %s / %s (%d st)", tt.query, *res.Place, res.Total, tt.label, tt.wantQuery, tt.total)
+		}
+	}
+	// Det större stället vinner fortfarande vid samma namn.
+	if res := s.Search("Lund", 100); res.Place.Label != "Lunds kommun" {
+		t.Errorf("Lund ska fortfarande ge kommunen, fick %s", res.Place.Label)
+	}
+}
+
+func TestAmbiguousSubLocationIsNotGuessed(t *testing.T) {
+	s := realSnapshot(t)
+	if res := s.Search("centrum", 100); res.Place != nil {
+		t.Errorf("centrum finns i många orter och ska inte gissas, fick %s", res.Place.Query)
+	}
+	got := s.Suggest("centrum", 8)
+	if len(got) < 5 || got[0].Label != "Centrum" || got[0].Detail == got[1].Detail {
+		t.Errorf("förslagen ska skilja orterna åt: %+v", got)
+	}
+}
+
+func TestSubLocationsDoNotCrowdOutTowns(t *testing.T) {
+	s := realSnapshot(t)
+	got := s.Suggest("stockholm", 8)
+	for _, want := range []string{"Stockholms kommun", "Stockholm", "Sthlm"} {
+		if !contains(got, want) {
+			t.Errorf("Suggest(stockholm) = %v, saknar %q", labels(got), want)
+		}
+	}
+	for i, p := range got {
+		if p.Kind != "plats" {
+			continue
+		}
+		for _, q := range got[i:] {
+			if q.Kind != "plats" {
+				t.Errorf("platsen %s står före %s %s", p.Query, q.Kind, q.Label)
+			}
+		}
+	}
+}
+
+func TestSameNamedSubLocationMergedIntoOrt(t *testing.T) {
+	s := realSnapshot(t)
+	n := 0
+	for _, p := range s.Suggest("svärtinge", 8) {
+		if p.Label == "Svärtinge" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("Svärtinge ska bara finnas en gång bland förslagen, fanns %d", n)
+	}
+}
+
 func TestSearchTyposAreNotGuessed(t *testing.T) {
 	s := realSnapshot(t)
 	for _, q := range []string{"upsala", "finnsintealls"} {

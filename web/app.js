@@ -5,11 +5,13 @@ const input = document.getElementById("q");
 const suggestionsEl = document.getElementById("suggestions");
 const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
+const staleEl = document.getElementById("stale-notice");
 const didYouMeanEl = document.getElementById("did-you-mean");
 const list = document.getElementById("stations");
 
 const tempFormat = new Intl.NumberFormat("sv-SE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const timeFormat = new Intl.DateTimeFormat("sv-SE", { hour: "2-digit", minute: "2-digit" });
+const dateFormat = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short" });
 
 let searchController = null;
 let suggestions = [];
@@ -74,34 +76,60 @@ async function search(q) {
 
 function render(data) {
   if (!data.place) {
-    showStatus(`Hittade ingen ort eller kommun som heter ”${data.query}”.`);
+    const sameName = (p) => p.label.localeCompare(data.query, "sv", { sensitivity: "accent" }) === 0;
+    const ambiguous = data.didYouMean.length > 1 && data.didYouMean.every(sameName);
+    showStatus(ambiguous
+      ? `Det finns flera platser som heter ”${data.query}”.`
+      : `Hittade ingen ort eller kommun som heter ”${data.query}”.`);
     renderDidYouMean(data.didYouMean);
     return;
   }
 
-  // Visa vilken plats sökningen ledde till, t.ex. "lund" → "Lunds kommun".
+  // Visa vilken plats sökningen ledde till, t.ex. "lund" → "Lunds kommun"
+  // eller "tre högars" → "Lund/Tre Högars väg".
   const { place, total } = data;
-  input.value = place.label;
+  input.value = place.query;
 
   const shown = data.stations.length;
   const count = `${total} ${total === 1 ? "mätpunkt" : "mätpunkter"}`;
-  const meta = [
-    data.average != null ? `Snitt av ${count}` : count,
-    shown < total ? `visar ${shown}` : "",
-    `uppdaterat ${timeFormat.format(new Date(data.fetchedAt))}`,
-  ];
-
+  const summaryLink = document.getElementById("summary-link");
   document.getElementById("summary-title").textContent = place.label;
   document.getElementById("summary-detail").textContent = place.detail;
-  document.getElementById("summary-meta").textContent = meta.filter(Boolean).join(" · ");
-  setTemp(document.getElementById("summary-temp"), data.average, "temp temp-lg");
+
+  // Servern säger till när flera hämtningar i rad har misslyckats.
+  if (data.stale) {
+    document.getElementById("stale-text").textContent =
+      `Det har varit problem att hämta ny data från temperatur.nu. Det som visas hämtades ${formatFetched(data.fetchedAt)}.`;
+  }
+  staleEl.hidden = !data.stale;
+
+  if (total === 1) {
+    // En enda mätpunkt: visa den bara i kortet, under det namn man valde,
+    // i stället för samma träff en gång till i en lista.
+    const st = data.stations[0];
+    document.getElementById("summary-meta").textContent = `Mätt ${formatUpdated(st.lastUpdate)}`;
+    setTemp(document.getElementById("summary-temp"), st.temp, "temp temp-lg");
+    summaryLink.href = isTnuURL(st.url) ? st.url : "https://www.temperatur.nu/";
+    summaryLink.hidden = false;
+    list.replaceChildren();
+  } else {
+    const meta = [
+      data.average != null ? `Snitt av ${count}` : count,
+      shown < total ? `visar ${shown}` : "",
+      `uppdaterat ${formatFetched(data.fetchedAt)}`,
+    ];
+    document.getElementById("summary-meta").textContent = meta.filter(Boolean).join(" · ");
+    setTemp(document.getElementById("summary-temp"), data.average, "temp temp-lg");
+    summaryLink.hidden = true;
+    list.replaceChildren(...data.stations.map(stationItem));
+  }
   summaryEl.hidden = false;
 
-  list.replaceChildren(...data.stations.map(stationItem));
-
-  // Kort sammanfattning för skärmläsare; resten finns i listan.
-  const avg = data.average != null ? `, snitt ${formatTemp(data.average)}` : "";
-  showStatus(`${place.label}: ${count}${avg}.`, { visuallyHidden: true });
+  // Kort sammanfattning för skärmläsare; resten finns i kortet och listan.
+  const temp = data.average == null ? "värde saknas" : formatTemp(data.average);
+  const summary = total === 1 ? temp : `${count}, ${data.average == null ? temp : `snitt ${temp}`}`;
+  const stale = data.stale ? ` Obs: datan kan vara inaktuell, den hämtades ${formatFetched(data.fetchedAt)}.` : "";
+  showStatus(`${place.label}: ${summary}.${stale}`, { visuallyHidden: true });
 }
 
 function renderDidYouMean(places) {
@@ -109,10 +137,11 @@ function renderDidYouMean(places) {
   const buttons = places.map((p) => {
     const b = document.createElement("button");
     b.type = "button";
-    b.textContent = p.label;
+    // Platser som "Centrum" finns i många orter; visa vilken.
+    b.textContent = p.kind === "plats" ? `${p.label} (${p.detail})` : p.label;
     b.addEventListener("click", () => {
-      input.value = p.label;
-      navigate(p.label);
+      input.value = p.query;
+      navigate(p.query);
     });
     return b;
   });
@@ -122,6 +151,7 @@ function renderDidYouMean(places) {
 
 function stationItem(s) {
   const li = document.createElement("li");
+  if (s.temp == null) li.className = "no-value";
   const a = document.createElement("a");
   a.href = isTnuURL(s.url) ? s.url : "https://www.temperatur.nu/";
   a.target = "_blank";
@@ -158,12 +188,8 @@ function stationItem(s) {
 function setTemp(el, t, baseClass) {
   if (t == null) {
     el.className = `${baseClass} temp-missing`;
-    el.textContent = "–";
-    el.title = "Värde saknas";
-    const sr = document.createElement("span");
-    sr.className = "visually-hidden";
-    sr.textContent = "värde saknas";
-    el.append(sr);
+    el.textContent = "Saknas";
+    el.title = "Mätpunkten har inget aktuellt värde";
     return;
   }
   el.className = `${baseClass} temp-${tempLevel(t)}`;
@@ -182,6 +208,7 @@ function tempLevel(t) {
 
 function clearResults() {
   summaryEl.hidden = true;
+  staleEl.hidden = true;
   showStatus("");
   didYouMeanEl.hidden = true;
   didYouMeanEl.replaceChildren();
@@ -306,9 +333,9 @@ function setActive(i) {
 }
 
 function choose(place) {
-  input.value = place.label;
+  input.value = place.query;
   closeSuggestions();
-  navigate(place.label);
+  navigate(place.query);
 }
 
 function openSuggestions() {
@@ -333,6 +360,14 @@ function isTnuURL(u) {
   } catch {
     return false;
   }
+}
+
+// formatFetched visar när listan hämtades: "kl. 18:40" i dag, annars med datum.
+function formatFetched(iso) {
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = `kl. ${timeFormat.format(d)}`;
+  return sameDay ? time : `${dateFormat.format(d)} ${time}`;
 }
 
 function formatTemp(t) {

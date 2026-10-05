@@ -34,11 +34,19 @@
       <p class="status" id="status" role="status" hidden></p>
       <p class="did-you-mean" id="did-you-mean" hidden></p>
 
+      <div class="notice" id="stale-notice" hidden>
+        <strong>Temperaturerna kan vara inaktuella</strong>
+        <span id="stale-text"></span>
+      </div>
+
       <div class="summary" id="summary" hidden>
         <div>
           <h2 id="summary-title"></h2>
           <p class="summary-detail" id="summary-detail"></p>
           <p class="summary-meta" id="summary-meta"></p>
+          <a class="summary-link" id="summary-link" target="_blank" rel="noopener" hidden>
+            Mer om mätpunkten på temperatur.nu<span class="visually-hidden"> (öppnas i ny flik)</span>
+          </a>
         </div>
         <span class="temp temp-lg" id="summary-temp"></span>
       </div>

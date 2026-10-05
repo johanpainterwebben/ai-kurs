@@ -28,6 +28,8 @@ func TestColorContrast(t *testing.T) {
 		{"link", "bg", 7}, {"link", "surface", 7},
 		{"on-accent", "accent", 7}, {"on-accent", "accent-hover", 7},
 		{"error-text", "error-bg", 7},
+		{"warning-text", "warning-bg", 7},
+		{"warning-border", "bg", 3},
 		{"border", "bg", 3}, {"border", "surface", 3},
 		{"focus", "bg", 3}, {"focus", "surface", 3}, {"focus", "select", 3},
 		{"accent-border", "bg", 3},

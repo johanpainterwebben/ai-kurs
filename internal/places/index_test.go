@@ -225,3 +225,49 @@ func TestIndexKeepsOldListWhenRefreshFails(t *testing.T) {
 		t.Fatal("förnyelsen kördes inte")
 	}
 }
+
+func TestStaleAfterMoreThanThreeFailuresInARow(t *testing.T) {
+	src := &fakeSource{}
+	x, clk := newTestIndex(src)
+	ctx := context.Background()
+	x.Get(ctx)
+	first, _ := x.Get(ctx)
+
+	refresh := func() {
+		clk.add(5 * time.Minute)
+		<-x.refreshIfDue()
+	}
+
+	src.err = errors.New("boom")
+	for i := 1; i <= StaleAfterFailures; i++ {
+		refresh()
+		if x.Stale() {
+			t.Fatalf("inaktuell redan efter %d misslyckanden", i)
+		}
+	}
+	refresh()
+	if !x.Stale() {
+		t.Fatalf("ska vara inaktuell efter %d misslyckanden i rad", StaleAfterFailures+1)
+	}
+	if snap, err := x.Get(ctx); err != nil || snap != first {
+		t.Fatalf("den gamla listan ska ligga kvar orörd: %v", err)
+	}
+
+	src.err = nil
+	refresh()
+	if x.Stale() {
+		t.Fatal("ska inte vara inaktuell efter en lyckad hämtning")
+	}
+	if snap, _ := x.Get(ctx); snap == first {
+		t.Fatal("den nya listan ska ha ersatt den gamla")
+	}
+
+	// Räkningen börjar om: tre nya fel räcker inte.
+	src.err = errors.New("boom")
+	for range StaleAfterFailures {
+		refresh()
+	}
+	if x.Stale() {
+		t.Fatal("felräkningen ska ha nollställts av den lyckade hämtningen")
+	}
+}
