@@ -1,0 +1,8 @@
+services:
+  temperatur:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Bara lokalt; en reverse proxy (t.ex. Caddy) står för HTTPS utåt.
+      - "127.0.0.1:8080:8080"

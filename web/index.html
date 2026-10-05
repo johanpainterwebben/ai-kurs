@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f6f3fb" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#14131c" media="(prefers-color-scheme: dark)">
+  <title>Temperatur nära dig</title>
+  <meta name="description" content="Sök en ort och se aktuell temperatur från mätpunkter i närheten. Data från temperatur.nu.">
+  <link rel="preload" href="fonts/atkinson-hyperlegible-next.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <h1>Temperatur</h1>
+      <p>Sök efter en ort eller kommun och se temperaturen på mätpunkterna där.</p>
+    </header>
+
+    <form class="search" id="search-form" role="search">
+      <div class="field">
+        <label class="visually-hidden" for="q">Ort eller kommun</label>
+        <input id="q" name="q" type="text" placeholder="t.ex. Uppsala" autocomplete="off" spellcheck="false"
+               minlength="2" maxlength="50" required autofocus
+               role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions">
+        <ul class="suggestions" id="suggestions" role="listbox" aria-label="Förslag" hidden></ul>
+      </div>
+      <button type="submit">Sök</button>
+    </form>
+
+    <section class="results" aria-labelledby="summary-title">
+      <p class="status" id="status" role="status" hidden></p>
+      <p class="did-you-mean" id="did-you-mean" hidden></p>
+
+      <div class="summary" id="summary" hidden>
+        <div>
+          <h2 id="summary-title"></h2>
+          <p class="summary-detail" id="summary-detail"></p>
+          <p class="summary-meta" id="summary-meta"></p>
+        </div>
+        <span class="temp temp-lg" id="summary-temp"></span>
+      </div>
+
+      <ol class="stations" id="stations"></ol>
+    </section>
+  </main>
+
+  <footer class="source">
+    <a href="https://www.temperatur.nu/" target="_blank" rel="noopener">
+      <span>Data från</span>
+      <span class="logo"><img src="temperatur-logo.png" alt="temperatur.nu" width="111" height="26"></span>
+      <span class="visually-hidden">(öppnas i ny flik)</span>
+    </a>
+  </footer>
+</body>
+</html>
