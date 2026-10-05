@@ -34,3 +34,5 @@ docker compose up -d --build
 ```
 
 Lyssnar på 127.0.0.1:8080. Lägg en reverse proxy med HTTPS framför (krävs senare för "min plats").
+
+Hela vägen till en publik server med HTTPS (Debian, Docker och Caddy) beskrivs steg för steg i [DEPLOY.md](DEPLOY.md).
