@@ -4,10 +4,20 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      # Bara lokalt; en reverse proxy (t.ex. Caddy) står för HTTPS utåt.
+      # Bara lokalt, för felsökning med curl. Utåt går trafiken via nginx och
+      # Cloudflare Tunnel i ~/Projects/server, som når appen på nätverket "proxy".
       - "127.0.0.1:8080:8080"
+    networks: [proxy]
     # Servern skriver inget till disk och behöver inga extra rättigheter.
     read_only: true
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  proxy:
+    # Skapas av ~/Projects/server; starta den först.
+    external: true

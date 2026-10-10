@@ -1,87 +1,67 @@
-# Driftsättning på en Debian-server
+# Driftsättning
 
-Plan för att ta "Vad ska jag ha för kläder?" från repot till en publik sajt med HTTPS på en server med **Debian 13 (*trixie*)**.
-
-> Installationsstegen (paket, paketkällor för Docker och Caddy, SSH-inställningen och Caddy-konfigurationen) är provkörda i en Debian 13-container. Det som kräver en riktig server – tjänster som startar vid uppstart, brandväggen och certifikatet – är inte provkört.
+Så här körs "Vad ska jag ha för kläder?" på **https://temperatur.pilros.se**: på en egen dator med **Debian 13 (*trixie*)** bakom en vanlig router, i Docker, publicerad via **Cloudflare Tunnel**.
 
 ```
-Besökare ──HTTPS──► Caddy (port 443, certifikat från Let's Encrypt)
-                      │
-                      ▼  127.0.0.1:8080 (bara lokalt)
-                    Docker-container med appen ──HTTPS──► api.temperatur.nu
+Besökare ──HTTPS──► Cloudflare ══tunnel══► cloudflared ──► nginx ──► temperatur:8080 ──HTTPS──► api.temperatur.nu
+                    (*.pilros.se)          └──── ~/Projects/server ────┘   └── det här repot
 ```
 
-Caddy tar emot all trafik utifrån och sköter HTTPS. Appen lyssnar bara lokalt och syns aldrig direkt på internet.
-
-Byt ut dessa platshållare överallt nedan:
-
-| Platshållare | Betyder |
-|---|---|
-| `vadskajagha.example.se` | din domän |
-| `deploy` | användaren du loggar in med på servern |
-| `SERVERNS-IP` | serverns publika IP-adress |
+- **Inga portar är öppna i routern.** `cloudflared` kopplar upp sig *utåt* mot Cloudflare, och besökarnas trafik kommer tillbaka genom den krypterade tunneln.
+- **HTTPS och certifikat sköts av Cloudflare.**
+- **Nginx och tunneln är gemensamma för alla tjänster på datorn** och ligger i `~/Projects/server`, inte i det här repot. Där finns också en README om hur nya tjänster läggs till. Appen ansluter till deras Docker-nätverk `proxy`, och nginx väljer tjänst utifrån värdnamnet.
+- **`pilros.se` utan subdomän svarar inte alls** (finns inte i DNS). Okända subdomäner får en enkel 404-sida.
 
 ---
 
 ## 0. Innan du börjar
 
-- [ ] En Debian 13-server med publik IP och SSH-åtkomst. Appen är liten: 1 vCPU, 1 GB RAM och 5 GB disk räcker gott (bygget är det som kräver mest).
-- [ ] Ett domännamn med en **A-post** (och AAAA-post om servern har IPv6) som pekar på `SERVERNS-IP`. Kontrollera med `dig +short vadskajagha.example.se`.
-- [ ] Port **80 och 443** öppna i eventuell brandvägg hos hostingleverantören (krävs för certifikatet).
+- [ ] Domänen (`pilros.se`) använder Cloudflares namnservrar.
+- [ ] En tunnel är skapad i Cloudflare Zero Trust → Networks → Tunnels, med token sparad.
 - [ ] `TNU_CLI`: din e-postadress.
-- [ ] Helst `TNU_CLI_KEY`: en klientnyckel från temperatur.nu (kontakt via https://www.temperatur.nu/info/api/). Enligt villkoren ska appar med flera användare signera sina anrop. Sajten fungerar tekniskt utan nyckel (den gör bara ~6 anrop i timmen), men skaffa en innan sajten görs publik.
+- [ ] Helst `TNU_CLI_KEY`: en klientnyckel från temperatur.nu (kontakt via https://www.temperatur.nu/info/api/). Enligt villkoren ska appar med flera användare signera sina anrop. Sajten fungerar tekniskt utan nyckel (den gör bara ~6 anrop i timmen), men skaffa en innan adressen sprids.
 
-## 1. Grundsäkra servern
+## 1. Grundsäkra datorn
 
-Logga in som root (eller med den användare leverantören gav dig). En minimal Debian 13 saknar bland annat `sudo`, `git` och `curl`, så de installeras först:
+Kör som root (`su -`, med bindestreck så att `/usr/sbin` kommer med) tills ditt vanliga konto har `sudo`:
 
 ```bash
 apt update && apt full-upgrade -y
-apt install -y sudo git curl ca-certificates gpg nano
-adduser deploy
-usermod -aG sudo deploy
+apt install -y sudo git curl ca-certificates
+usermod -aG sudo johan        # logga sedan ut från skrivbordet och in igen
 ```
 
-Lägg in din publika SSH-nyckel för `deploy` – kör detta **på din egen dator**:
+Därefter används det vanliga kontot med `sudo`.
+
+Automatiska säkerhetsuppdateringar (svara "Ja"):
 
 ```bash
-ssh-copy-id deploy@SERVERNS-IP
+sudo apt install -y unattended-upgrades apt-listchanges
+sudo dpkg-reconfigure -plow unattended-upgrades
 ```
 
-Stäng av lösenordsinloggning och root-inloggning över SSH (på servern):
-
-```bash
-sudo tee /etc/ssh/sshd_config.d/99-hardening.conf >/dev/null <<'EOF'
-PasswordAuthentication no
-PermitRootLogin no
-EOF
-sudo systemctl reload ssh
-```
-
-> **Viktigt:** Testa att du kan logga in som `deploy` med nyckel i ett **nytt** terminalfönster innan du stänger det du har öppet.
-
-Brandvägg – bara SSH, HTTP och HTTPS:
+Brandvägg – inget inkommande, allt utgående (tunneln går utåt och påverkas inte):
 
 ```bash
 sudo apt install -y ufw
-sudo ufw allow OpenSSH
-sudo ufw allow 80,443/tcp
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
 sudo ufw enable
 ```
 
-> Docker går förbi ufw för portar som publiceras utåt. Därför binder `docker-compose.yml` appen till `127.0.0.1:8080` – den nås bara via Caddy. Ändra inte det till `8080:8080`.
-
-Automatiska säkerhetsuppdateringar och korrekt klocka (krävs för HTTPS):
+Stäng av tjänster som inte behövs, om datorn inte ska skriva ut:
 
 ```bash
-sudo apt install -y unattended-upgrades
-sudo dpkg-reconfigure -plow unattended-upgrades   # svara "Ja"
-timedatectl                                        # "System clock synchronized: yes"
+sudo systemctl disable --now cups cups-browsed avahi-daemon
 ```
+
+> **Lägg inte till kontot i gruppen `docker`** – det ger root utan lösenord. Kör Docker med `sudo`. Ta bort det om det redan är gjort: `sudo gpasswd -d johan docker`.
+
+Slå på **tvåfaktorsinloggning** för Cloudflare- och GitHub-kontona. Den som kommer åt Cloudflare kan ta över domänen och tunneln.
 
 ## 2. Installera Docker
 
-Från Dockers officiella paketförråd. Debians egna paket (`docker.io`) är ofta äldre, och `docker compose` (version 2 eller senare) behövs för `docker-compose.yml`. Paketkällan skrivs i det format (deb822, `.sources`) som Debian 13 använder:
+Från Dockers officiella paketförråd (Debians `docker.io` är ofta äldre, och `docker compose` v2 behövs):
 
 ```bash
 sudo install -m 0755 -d /etc/apt/keyrings
@@ -99,49 +79,45 @@ sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin d
 sudo docker run --rm hello-world
 ```
 
-Begränsa containerloggarnas storlek (annars växer de tills disken är full):
-
-```bash
-sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
-{
-  "log-driver": "json-file",
-  "log-opts": { "max-size": "10m", "max-file": "3" }
-}
-EOF
-sudo systemctl restart docker
-```
-
-> Lägg **inte** till `deploy` i gruppen `docker` – det ger i praktiken root-behörighet. Kör Docker med `sudo`.
+Loggstorleken begränsas i varje `docker-compose.yml` (3 × 10 MB per container).
 
 ## 3. Hämta koden
 
-Repot är privat. Skapa en **deploy key** som bara kan läsa just det här repot (`git` installerades i steg 1):
+Repot är privat. Enklast med GitHub CLI, som loggar in via webbläsaren:
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/ai-kurs-deploy -N "" -C "deploy@vadskajagha"
-cat ~/.ssh/ai-kurs-deploy.pub
+sudo apt install -y gh
+gh auth login                  # GitHub.com → HTTPS → Login with a web browser
+mkdir -p ~/Projects && cd ~/Projects
+gh repo clone johanpainterwebben/ai-kurs
 ```
 
-Lägg in den publika nyckeln på GitHub: repot → *Settings* → *Deploy keys* → *Add deploy key*. Kryssa **inte** i "Allow write access".
+## 4. Den gemensamma ingången (nginx + tunnel)
+
+Ligger i `~/Projects/server` och startas **före** appen, eftersom den skapar nätverket `proxy`. Fullständig beskrivning finns i `~/Projects/server/README.md`; i korthet:
+
+1. `tunnel.env` med `TUNNEL_TOKEN=…` (`chmod 600`).
+2. I Cloudflare Zero Trust → Networks → Tunnels → din tunnel → **Published application routes** (hette tidigare *Public Hostname*): Subdomain `*`, Domain `pilros.se`, Service **HTTP** `nginx:8080`.
+3. Under DNS för pilros.se: en CNAME-post `*` → `<tunnel-id>.cfargotunnel.com`, *Proxied* (orange moln). Ingen post för `pilros.se` själv.
+4. Nginx-konfigurationen för appen finns i `nginx/conf.d/temperatur.pilros.se.conf`.
 
 ```bash
-cat >> ~/.ssh/config <<'EOF'
-Host github-ai-kurs
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/ai-kurs-deploy
-  IdentitiesOnly yes
-EOF
-
-sudo mkdir -p /opt/vad-ska-jag-ha
-sudo chown deploy:deploy /opt/vad-ska-jag-ha
-git clone git@github-ai-kurs:johanpainterwebben/ai-kurs.git /opt/vad-ska-jag-ha
-cd /opt/vad-ska-jag-ha
+cd ~/Projects/server
+sudo docker compose up -d
+sudo docker compose exec nginx nginx -t
+sudo docker compose logs cloudflared | grep -i "registered tunnel"
 ```
 
-## 4. Konfigurera
+Rekommenderade inställningar i Cloudflare (gratis):
+
+- SSL/TLS → Edge Certificates: **Always Use HTTPS** på, **Minimum TLS Version** 1.2.
+- Security → Bots: **Bot Fight Mode** på.
+- Security → WAF: Cloudflares **Managed rules** på.
+
+## 5. Konfigurera appen
 
 ```bash
+cd ~/Projects/ai-kurs
 cp .env.example .env
 nano .env          # TNU_CLI=din@epost.se, TNU_CLI_KEY=nyckeln (om du har den)
 chmod 600 .env
@@ -149,9 +125,10 @@ chmod 600 .env
 
 `.env` innehåller nyckeln – den ska aldrig checkas in (den finns redan i `.gitignore`).
 
-## 5. Bygg och starta appen
+## 6. Bygg och starta appen
 
 ```bash
+cd ~/Projects/ai-kurs
 sudo docker compose up -d --build
 sudo docker compose ps                       # STATUS ska vara "Up"
 sudo docker compose logs --tail 20
@@ -161,85 +138,34 @@ curl -s "http://127.0.0.1:8080/api/search?q=Lund" | head -c 200; echo
 
 I loggen ska det stå `hämtade alla mätpunkter antal=…` inom några sekunder. Saknas nyckeln står det också `osignerade anrop` – det är väntat tills du lagt in `TNU_CLI_KEY`.
 
-Containern startar om av sig själv vid krasch och när servern startas om (`restart: unless-stopped`, och Docker startar vid uppstart).
-
-## 6. HTTPS med Caddy
-
-Installera Caddy från dess officiella paketförråd. (Caddys egen anvisning nämner även paketet `apt-transport-https` – det finns inte i Debian 13 och behövs inte, apt klarar HTTPS själv.)
-
-```bash
-sudo apt install -y debian-keyring debian-archive-keyring
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install -y caddy
-```
-
-Ersätt `/etc/caddy/Caddyfile` med (konfigurationen är validerad med `caddy validate`):
-
-```caddyfile
-vadskajagha.example.se {
-	encode zstd gzip
-
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		-Server
-	}
-
-	reverse_proxy 127.0.0.1:8080
-
-	log {
-		output file /var/log/caddy/vadskajagha.log {
-			roll_size 10MiB
-			roll_keep 5
-			roll_keep_for 168h
-		}
-	}
-}
-```
-
-```bash
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-sudo systemctl reload caddy
-sudo journalctl -u caddy --since "5 min ago" | grep -i certificate
-```
-
-Caddy hämtar och förnyar certifikatet automatiskt. Det kräver att DNS pekar rätt och att port 80 och 443 är öppna.
-
-Vad Caddy står för:
-
-- **HTTPS och HSTS** – webbläsaren använder bara HTTPS. Appens övriga säkerhetsrubriker (CSP m.m.) skickas vidare oförändrade.
-- **Komprimering** (`encode`) – HTML, CSS, JS och JSON krymper till ungefär en fjärdedel till en tredjedel av storleken.
-- **Åtkomstloggar** – innehåller besökarnas IP-adresser, som är personuppgifter. De sparas därför bara i 7 dagar.
-
-> Anropsbegränsning per IP-adress finns inte i Caddys standardversion (kräver pluginet `caddy-ratelimit` och en egenbyggd Caddy). Appen är byggd för att tåla många anrop – en sökning kostar under en millisekund och inga anrop mot temperatur.nu – så det kan vänta tills det behövs.
+Containrarna startar om av sig själva vid krasch och när datorn startas om (`restart: unless-stopped`, och Docker startar vid uppstart).
 
 ## 7. Kontrollera
 
-- [ ] `https://vadskajagha.example.se` öppnas med giltigt certifikat, och en sökning fungerar.
-- [ ] `http://vadskajagha.example.se` skickas vidare till HTTPS.
-- [ ] `curl -sI https://vadskajagha.example.se | grep -iE 'strict-transport|content-security'` visar båda rubrikerna.
-- [ ] Testa gärna på https://www.ssllabs.com/ssltest/ (mål: A eller bättre) och https://securityheaders.com/.
+- [ ] `https://temperatur.pilros.se` öppnas och en sökning fungerar.
+- [ ] `curl -sI https://temperatur.pilros.se | grep -iE 'strict-transport|content-security'` visar båda rubrikerna.
+- [ ] `https://pilros.se` ger inget svar (namnet finns inte), och `https://finnsinte.pilros.se` ger 404-sidan utan nämnande av nginx.
+- [ ] Testa gärna på https://www.ssllabs.com/ssltest/ och https://securityheaders.com/.
 - [ ] Efter en halvtimme: `sudo docker compose logs | grep -c "hämtade alla mätpunkter"` ger ungefär 3–4 (en hämtning var 10:e minut). Fler än så tyder på fel – då riskerar API-villkoren att brytas.
+
+> Har du nyligen besökt en subdomän innan den fanns i DNS kan routern minnas "finns inte" i upp till 30 minuter. Testa från mobilen utan wifi, vänta, eller starta om routern.
 
 ## 8. Uppdatera och rulla tillbaka
 
 Ny version:
 
 ```bash
-cd /opt/vad-ska-jag-ha
+cd ~/Projects/ai-kurs
 git pull
 sudo docker compose up -d --build
 sudo docker image prune -f
 ```
 
-En gång i månaden, för säkerhetsuppdateringar i Go och basimagen (även om koden inte ändrats):
+En gång i månaden, för säkerhetsuppdateringar i Go, basimagen, nginx och cloudflared (även om koden inte ändrats):
 
 ```bash
-sudo docker compose build --pull && sudo docker compose up -d
+cd ~/Projects/ai-kurs && sudo docker compose build --pull && sudo docker compose up -d
+cd ~/Projects/server && sudo docker compose pull && sudo docker compose up -d
 ```
 
 Rulla tillbaka till en tidigare version:
@@ -255,21 +181,26 @@ git checkout main                 # när felet är rättat och du vill tillbaka
 
 ## 9. Löpande drift
 
-- **Övervakning:** Lägg upp en extern koll mot `https://vadskajagha.example.se/healthz` (t.ex. UptimeRobot eller Uptime Kuma) som larmar om sajten inte svarar.
-- **Loggar:** `sudo docker compose logs -f`. Håll utkik efter `listan räknas nu som inaktuell` – då har hämtningen från temperatur.nu misslyckats fyra gånger i rad och sajten visar en varning för besökarna.
-- **Säkerhetskopiering:** Det enda som inte går att återskapa från repot är `.env`. Spara den på ett säkert ställe. Caddys certifikat hämtas automatiskt på nytt.
+- **Övervakning:** Lägg upp en extern koll mot `https://temperatur.pilros.se/healthz` (t.ex. UptimeRobot) som larmar om sajten inte svarar.
+- **Loggar:** `sudo docker compose logs -f` här, och `nginx`/`cloudflared` i `~/Projects/server`. Håll utkik efter `listan räknas nu som inaktuell` – då har hämtningen från temperatur.nu misslyckats fyra gånger i rad och sajten visar en varning för besökarna.
+- **Säkerhetskopiering:** Det som inte går att återskapa från repona är `.env` och `~/Projects/server/tunnel.env`. Spara dem på ett säkert ställe. Läcker tunnelns token: skapa en ny i Cloudflare, lägg in den i `tunnel.env` och starta om `cloudflared`.
 
 ## 10. Felsökning
 
 | Symptom | Trolig orsak | Åtgärd |
 |---|---|---|
-| Containern avslutas direkt, loggen säger `TNU_CLI saknas` | `.env` saknas eller är tom | Steg 4 |
-| Caddy får inget certifikat | DNS pekar inte rätt, eller port 80/443 stängd | `dig +short vadskajagha.example.se`, kontrollera brandväggar |
-| `502 Bad Gateway` från Caddy | Appen kör inte | `sudo docker compose ps` och `logs` |
+| Containern avslutas direkt, loggen säger `TNU_CLI saknas` | `.env` saknas eller är tom | Steg 5 |
+| `network proxy declared as external, but could not be found` | Den gemensamma ingången är inte startad | Steg 4 först |
+| Webbläsaren hittar inte adressen | DNS-posten `*` saknas, eller gammalt "finns inte" i routerns minne | Steg 4.3; se notisen i steg 7 |
+| Cloudflares felsida 1033 | `cloudflared` kör inte eller har fel token | `sudo docker compose logs cloudflared` i `~/Projects/server` |
+| "Tjänsten är inte tillgänglig just nu" (502) | Appen kör inte, eller är inte ansluten till `proxy` | `sudo docker compose ps` och `logs` här |
+| 404-sidan på temperatur.pilros.se | Nginx saknar filen för värdnamnet | `nginx/conf.d/temperatur.pilros.se.conf` i `~/Projects/server` |
+| `service "nginx" is not running` | Kommandot kördes i fel mapp | Nginx-kommandon körs i `~/Projects/server` |
+| `usermod: command not found` som root | Root via `su` utan bindestreck | `su -`, eller `/usr/sbin/usermod` |
 | Gul varning "Temperaturerna kan vara inaktuella" | Fyra misslyckade hämtningar i rad | Loggen visar orsaken; kontrollera nätverket och att klienten inte är blockerad hos temperatur.nu |
 | Loggen säger `klienten är blockerad` | temperatur.nu har blockerat `cli` | Kontakta temperatur.nu; skaffa/lägg in `TNU_CLI_KEY` |
 
-## Innan sajten görs publik
+## Innan adressen sprids
 
 - [ ] `TNU_CLI_KEY` från temperatur.nu ligger i `.env` (loggen säger `signerar anrop mot temperatur.nu`).
 - [ ] Källhänvisningen till temperatur.nu syns längst ned på sidan (finns redan).
