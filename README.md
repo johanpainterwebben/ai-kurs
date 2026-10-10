@@ -33,6 +33,6 @@ Se https://www.temperatur.nu/info/api/.
 docker compose up -d --build
 ```
 
-Lyssnar på 127.0.0.1:8080. Lägg en reverse proxy med HTTPS framför (krävs senare för "min plats").
+Kräver `.env` (se ovan). Lyssnar på 127.0.0.1:8080 och ansluter till Docker-nätverket `proxy`, där den gemensamma nginx + Cloudflare Tunnel (repot `~/Projects/server`) publicerar den på https://temperatur.pilros.se. Starta den först.
 
-Hela vägen till en publik server med HTTPS (Debian, Docker och Caddy) beskrivs steg för steg i [DEPLOY.md](DEPLOY.md).
+Hela uppsättningen (Debian, Docker, nginx och Cloudflare Tunnel) beskrivs steg för steg i [DEPLOY.md](DEPLOY.md).
