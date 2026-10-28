@@ -60,6 +60,11 @@
         <input id="q" name="q" type="text" placeholder="t.ex. Uppsala" autocomplete="off" spellcheck="false"
                minlength="2" maxlength="50" required autofocus
                role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="suggestions">
+        <button type="button" class="clear" id="clear" aria-label="Rensa sökfältet" hidden>
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+            <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+        </button>
         <ul class="suggestions" id="suggestions" role="listbox" aria-label="Förslag" hidden></ul>
       </div>
       <button type="submit">Sök</button>

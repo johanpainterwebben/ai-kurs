@@ -2,6 +2,7 @@
 
 const form = document.getElementById("search-form");
 const input = document.getElementById("q");
+const clearButton = document.getElementById("clear");
 const suggestionsEl = document.getElementById("suggestions");
 const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
@@ -50,7 +51,7 @@ function navigate(q) {
 
 function loadFromURL() {
   const q = new URLSearchParams(location.search).get("q") || "";
-  input.value = q;
+  setQuery(q);
   closeSuggestions();
   if (q.trim().length >= 2) {
     search(q);
@@ -94,7 +95,7 @@ function render(data) {
   // Visa vilken plats sökningen ledde till, t.ex. "lund" → "Lunds kommun"
   // eller "tre högars" → "Lund/Tre Högars väg".
   const { place, total } = data;
-  input.value = place.query;
+  setQuery(place.query);
 
   const shown = data.stations.length;
   const count = `${total} ${total === 1 ? "mätpunkt" : "mätpunkter"}`;
@@ -147,7 +148,7 @@ function renderDidYouMean(places) {
     // Platser som "Centrum" finns i många orter; visa vilken.
     b.textContent = p.kind === "plats" ? `${p.label} (${p.detail})` : p.label;
     b.addEventListener("click", () => {
-      input.value = p.query;
+      setQuery(p.query);
       navigate(p.query);
     });
     return b;
@@ -270,7 +271,19 @@ function dressFigure(t) {
 
 // ---- Förslag medan man skriver ----
 
+function setQuery(value) {
+  input.value = value;
+  clearButton.hidden = value === "";
+}
+
+clearButton.addEventListener("click", () => {
+  setQuery("");
+  closeSuggestions();
+  input.focus();
+});
+
 input.addEventListener("input", () => {
+  clearButton.hidden = input.value === "";
   clearTimeout(suggestTimer);
   const q = input.value.trim();
   if (q.length < 2) {
@@ -380,7 +393,7 @@ function setActive(i) {
 }
 
 function choose(place) {
-  input.value = place.query;
+  setQuery(place.query);
   closeSuggestions();
   navigate(place.query);
 }
