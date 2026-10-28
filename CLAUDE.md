@@ -37,6 +37,17 @@ Domänbegrepp som kommer från temperatur.nu och svenska orter heter som i svens
 - Ett eget lager slår ihop källorna per plats till ett samlat resultat. Det vägs efter avstånd och ålder på mätningen, och extremvärden sorteras bort. Svaret visar vilka källor som ingår och hur mycket de skiljer sig åt.
 - Varje källa ska ha källhänvisning i gränssnittet om dess villkor kräver det.
 
+### Lätt lista, detaljer vid utfällning (målbild)
+
+Listan över mätpunkter ska vara så lätt som möjligt, och mer data hämtas först när man fäller ut en enskild rad. Källorna har ingen egen vy; det är samma lista oavsett källa.
+
+- **I listan** visas bara det som behövs för en snabb överblick: namn, temperatur och tid, och eventuellt någon enstaka uppgift till (t.ex. vind). Varje fält som läggs till i `/api/search` multipliceras med upp till `maxStations` (100) rader för varje sökning, så nya fält i listan ska motiveras.
+- **Vid utfällning** hämtar sidan detaljerna för just den mätpunkten, och inte förrän dess. Det kräver en egen endpoint (t.ex. `/api/station`) som tar mätpunktens `source` och `id`, aldrig fri text, och som validerar dem mot cachen.
+- **Detaljerna kommer från serverns cache.** Besökare får aldrig utlösa ett anrop mot en källa. Behöver en källa ett eget anrop per mätpunkt går det genom källans `budget`, har en egen cache med minst fem minuters giltighet och körs i bakgrunden eller delas mellan besökare, så att femminutersregeln och anropsgränsen följs även när många fäller ut samma rad.
+- **Datamodellen** (`obs.Station`) delas upp i en lätt del som alltid finns i listan och en detaljdel med valfria fält (`nil` när källan saknar dem, som `Temp` i dag). Dagens `moh`, `sourceInfo`, `forutsattning`, `uptime` och `homepageUrl` från temperatur.nu läses inte in än och är de första kandidaterna för detaljdelen.
+- **Tillgänglighet:** utfällningen är en riktig knapp med `aria-expanded` och `aria-controls`, fungerar med tangentbord, har synlig fokusmarkering och ingen rörelse vid `prefers-reduced-motion`. Raden är i dag en länk till temperatur.nu, så länken och knappen får skilda ytor.
+- **Prestanda:** mät svarsstorlek för `/api/search` och minne före och efter, och håll benchmarken för `Suggest` oförändrad.
+
 ### Frontend – Svelte
 
 - Frontend ska skrivas i **Svelte** (Svelte 5 + Vite). I dag är den skriven i vanlig JavaScript i `web/`, och den ska flyttas över till Svelte.
