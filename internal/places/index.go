@@ -1,163 +1,49 @@
 // Package places håller en lokal kopia av alla mätpunkter och söker i den.
 //
 // Hela listan hämtas med ett enda API-anrop när servern startar och förnyas
-// sedan i bakgrunden en gång per intervall. Besökare läser alltid ur den
-// lokala kopian, så de väntar aldrig på temperatur.nu och deras sökningar,
-// förslag och felstavningar kostar inga API-anrop.
+// sedan i bakgrunden en gång per intervall (se package feed). Besökare läser
+// alltid ur den lokala kopian, så de väntar aldrig på temperatur.nu och deras
+// sökningar, förslag och felstavningar kostar inga API-anrop.
 package places
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
-	"temperatur/internal/tnu"
+	"temperatur/internal/feed"
+	"temperatur/internal/obs"
 )
 
-// StaleAfterFailures är hur många misslyckade hämtningar i rad som tolereras
-// innan listan räknas som inaktuell (se Stale).
-const StaleAfterFailures = 3
-
-// Index håller den senast hämtade listan. Run förnyar den i bakgrunden.
-// Misslyckas en hämtning behålls den förra listan. Ett nytt försök görs
-// aldrig tidigare än ett intervall efter det förra, inte heller efter fel –
-// det är API-villkorets femminutersregel.
+// Index håller den senast hämtade listan, förberedd för sökning.
 type Index struct {
-	src      tnu.Source
-	interval time.Duration
-	log      *slog.Logger
-	now      func() time.Time
-	after    func(time.Duration) <-chan time.Time
-
-	mu          sync.Mutex
-	snap        *Snapshot
-	lastAttempt time.Time
-	lastErr     error
-	failures    int           // misslyckade hämtningar i rad
-	refreshing  chan struct{} // icke-nil medan en hämtning pågår
+	feed *feed.Feed[*Snapshot]
 }
 
 // NewIndex skapar ett index som förnyas högst en gång per interval.
-func NewIndex(src tnu.Source, interval time.Duration, log *slog.Logger) *Index {
-	return &Index{src: src, interval: interval, log: log, now: time.Now, after: time.After}
+func NewIndex(src obs.Source, interval time.Duration, log *slog.Logger) *Index {
+	fetch := func(ctx context.Context) (*Snapshot, error) {
+		stations, err := src.AllStations(ctx)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("hämtade alla mätpunkter", "antal", len(stations))
+		return newSnapshot(stations, time.Now()), nil
+	}
+	return &Index{feed: feed.New("mätpunkter", interval, fetch, log)}
 }
 
 // Run hämtar listan direkt och förnyar den sedan en gång per intervall tills
 // ctx avslutas. Körs i en egen gorutin.
-func (x *Index) Run(ctx context.Context) {
-	for {
-		if done := x.refreshIfDue(); done != nil {
-			select {
-			case <-done:
-			case <-ctx.Done():
-				return
-			}
-		}
-		x.mu.Lock()
-		next := x.lastAttempt.Add(x.interval).Sub(x.now())
-		x.mu.Unlock()
-		select {
-		case <-x.after(max(next, 0)):
-		case <-ctx.Done():
-			return
-		}
-	}
-}
+func (x *Index) Run(ctx context.Context) { x.feed.Run(ctx) }
 
 // Get returnerar aktuell lista utan att vänta. Bara om ingen lista har
 // hunnit hämtas än (precis efter start) väntar Get på hämtningen.
-func (x *Index) Get(ctx context.Context) (*Snapshot, error) {
-	x.mu.Lock()
-	snap := x.snap
-	x.mu.Unlock()
-	if snap != nil {
-		return snap, nil
-	}
+func (x *Index) Get(ctx context.Context) (*Snapshot, error) { return x.feed.Get(ctx) }
 
-	if wait := x.refreshIfDue(); wait != nil {
-		select {
-		case <-wait:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
+// Stale anger att flera hämtningar i rad har misslyckats, så att listan kan
+// vara inaktuell. Nollställs vid nästa lyckade hämtning.
+func (x *Index) Stale() bool { return x.feed.Stale() }
 
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if x.snap != nil {
-		return x.snap, nil
-	}
-	return nil, x.lastErr
-}
-
-// Stale anger att fler än StaleAfterFailures hämtningar i rad har misslyckats,
-// så att listan kan vara inaktuell. Nollställs vid nästa lyckade hämtning.
-func (x *Index) Stale() bool {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	return x.failures > StaleAfterFailures
-}
-
-// refreshIfDue startar en hämtning om ingen pågår och intervallet sedan
-// förra försöket har gått. Returnerar den pågående hämtningens kanal, som
-// stängs när den är klar, eller nil om ingen hämtning pågår.
-func (x *Index) refreshIfDue() chan struct{} {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if x.refreshing == nil && (x.lastAttempt.IsZero() || x.now().Sub(x.lastAttempt) >= x.interval) {
-		x.lastAttempt = x.now()
-		x.refreshing = make(chan struct{})
-		go x.refresh(x.refreshing)
-	}
-	return x.refreshing
-}
-
-func (x *Index) refresh(done chan struct{}) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	start := x.now()
-	snap, err := x.fetch(ctx)
-	if err == nil {
-		x.log.Info("hämtade alla mätpunkter", "antal", len(snap.stations), "tid", x.now().Sub(start))
-	} else {
-		x.log.Error("kunde inte hämta mätpunkter", "err", err)
-	}
-
-	x.mu.Lock()
-	if snap != nil {
-		x.snap = snap // en misslyckad hämtning lämnar den förra listan orörd
-		if x.failures > StaleAfterFailures {
-			x.log.Info("hämtningarna fungerar igen", "misslyckade_i_rad", x.failures)
-		}
-		x.failures = 0
-	} else {
-		x.failures++
-		if x.failures == StaleAfterFailures+1 {
-			x.log.Warn("listan räknas nu som inaktuell", "misslyckade_i_rad", x.failures)
-		}
-	}
-	x.lastErr = err
-	x.refreshing = nil
-	x.mu.Unlock()
-	close(done)
-}
-
-// fetch hämtar och bearbetar listan. En panik (t.ex. av oväntad data)
-// blir ett vanligt fel: annars skulle servern krascha, startas om av Docker
-// och hämta på nytt direkt – en loop som bryter mot femminutersregeln och
-// kan få klienten blockerad.
-func (x *Index) fetch(ctx context.Context) (snap *Snapshot, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			snap, err = nil, fmt.Errorf("places: panik vid hämtning: %v", r)
-		}
-	}()
-	stations, err := x.src.AllStations(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return newSnapshot(stations, x.now()), nil
-}
+// Ready anger om en lista har hämtats minst en gång.
+func (x *Index) Ready() bool { return x.feed.Loaded() }

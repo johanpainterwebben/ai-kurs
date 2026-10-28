@@ -7,6 +7,7 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}",
+      "buildFlags": "-tags=mock",
       "env": { "TNU_MOCK": "1" }
     },
     {

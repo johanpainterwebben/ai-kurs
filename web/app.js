@@ -15,6 +15,7 @@ const tempFormat = new Intl.NumberFormat("sv-SE", { minimumFractionDigits: 1, ma
 const timeFormat = new Intl.DateTimeFormat("sv-SE", { hour: "2-digit", minute: "2-digit" });
 const dateFormat = new Intl.DateTimeFormat("sv-SE", { day: "numeric", month: "short" });
 const stockholmDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm" });
+const stockholmTime = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" });
 
 let searchController = null;
 let suggestions = [];
@@ -112,7 +113,7 @@ function render(data) {
     // En enda mätpunkt: visa den bara i kortet, under det namn man valde,
     // i stället för samma träff en gång till i en lista.
     const st = data.stations[0];
-    document.getElementById("summary-meta").textContent = `Mätt ${formatUpdated(st.lastUpdate)}`;
+    document.getElementById("summary-meta").textContent = `Mätt ${formatUpdated(st.measuredAt)}`;
     setTemp(document.getElementById("summary-temp"), st.temp, "temp temp-lg");
     summaryLink.href = isTnuURL(st.url) ? st.url : "https://www.temperatur.nu/";
     summaryLink.hidden = false;
@@ -178,7 +179,7 @@ function stationItem(s) {
   });
   const meta = document.createElement("span");
   meta.className = "station-meta";
-  meta.textContent = [s.kommun, formatUpdated(s.lastUpdate)].filter(Boolean).join(" · ");
+  meta.textContent = [s.kommun, formatUpdated(s.measuredAt)].filter(Boolean).join(" · ");
   const newTab = document.createElement("span");
   newTab.className = "visually-hidden";
   newTab.textContent = "(öppnas i ny flik på temperatur.nu)";
@@ -433,14 +434,15 @@ function formatTemp(t) {
   return `${tempFormat.format(t)}°`;
 }
 
-// lastUpdate kommer som "2026-10-05 18:39:00" i svensk tid.
-// Visa bara klockslag om det är från i dag, annars datum och tid.
-function formatUpdated(s) {
-  if (!s) return "";
-  const [date, time = ""] = s.split(" ");
-  const hhmm = time.slice(0, 5);
-  const today = stockholmDate.format(new Date());
-  return date === today ? `kl. ${hhmm}` : `${date} ${hhmm}`;
+// measuredAt kommer som ISO-tid i UTC ("2026-10-05T16:39:00Z"). Visa den i
+// svensk tid, och bara klockslag om den är från i dag, annars datum och tid.
+function formatUpdated(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const date = stockholmDate.format(d);
+  const hhmm = stockholmTime.format(d);
+  return date === stockholmDate.format(new Date()) ? `kl. ${hhmm}` : `${date} ${hhmm}`;
 }
 
 // joinWith(["a","b","c"], ", ", " eller ") → ["a", ", ", "b", " eller ", "c"]

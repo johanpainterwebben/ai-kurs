@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Håller Go-moduler, de låsta actions-versionerna (commit-SHA) och
+  # basimagerna uppdaterade. Varje uppdatering kommer som en PR som går
+  # genom samma CI som annan kod.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

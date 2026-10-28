@@ -5,13 +5,13 @@
 //   - Anropen signeras när en klientnyckel finns; sign läggs sist i URL:en.
 //   - Utan nyckel begränsar klienten sig själv till under ~30 anrop per timme.
 //
-// Att samma fråga inte ställs oftare än var femte minut sköts av
-// places.Index, som är den enda som anropar klienten.
+// Att samma fråga inte ställs oftare än var femte minut sköts av feed.Feed,
+// som är den enda som anropar klienten.
 package tnu
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // MD5 är föreskrivet av API:ets signering
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -21,9 +21,15 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+	_ "time/tzdata" // tidszonen Europe/Stockholm; distroless-avbildningen saknar zoneinfo
+
+	"temperatur/internal/budget"
+	"temperatur/internal/obs"
 )
+
+// SourceName är det namn mätpunkterna får i obs.Station.Source.
+const SourceName = "temperatur.nu"
 
 // endpoint är API:ets adress utan schema, eftersom det är så den ska ingå i signaturen.
 const endpoint = "api.temperatur.nu/tnu_1.20.php"
@@ -32,42 +38,18 @@ const endpoint = "api.temperatur.nu/tnu_1.20.php"
 // utan signering. API:et blockerar efter "ca 30", så vi håller marginal.
 const UnsignedHourlyLimit = 25
 
-var (
-	// ErrBudgetExhausted betyder att klienten själv stoppade anropet för att
-	// inte överskrida gränsen för osignerade anrop. Inget anrop gick iväg.
-	ErrBudgetExhausted = errors.New("tnu: anropsgränsen för osignerade anrop är nådd")
-	// ErrBlocked betyder att API:et rapporterar att klienten är blockerad.
-	ErrBlocked = errors.New("tnu: klienten är blockerad av temperatur.nu")
-)
-
-// Station är en mätpunkt.
-type Station struct {
-	ID         string   `json:"id"`
-	Title      string   `json:"title"`
-	Temp       *float64 `json:"temp"` // nil om mätpunkten saknar giltigt värde
-	Lat        *float64 `json:"lat"`
-	Lon        *float64 `json:"lon"`
-	Kommun     string   `json:"kommun"`
-	Lan        string   `json:"lan"`
-	LastUpdate string   `json:"lastUpdate"` // svensk lokal tid, "2006-01-02 15:04:05"
-	URL        string   `json:"url"`
-}
-
-// Source levererar alla mätpunkter.
-type Source interface {
-	AllStations(ctx context.Context) ([]Station, error)
-}
+// ErrBlocked betyder att API:et rapporterar att klienten är blockerad.
+var ErrBlocked = errors.New("tnu: klienten är blockerad av temperatur.nu")
 
 // Client anropar det riktiga API:et.
 type Client struct {
-	cli  string
-	key  string
-	http *http.Client
-
-	mu    sync.Mutex
-	calls []time.Time // tidpunkter för osignerade anrop senaste timmen
-	now   func() time.Time
+	cli    string
+	key    string
+	http   *http.Client
+	budget *budget.Budget // bara för osignerade anrop; nil när anropen signeras
 }
+
+var _ obs.Source = (*Client)(nil)
 
 // NewClient skapar en klient. key får vara tom; då skickas osignerade anrop
 // och klienten håller sig under UnsignedHourlyLimit.
@@ -75,7 +57,11 @@ func NewClient(cli, key string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Client{cli: cli, key: key, http: httpClient, now: time.Now}
+	c := &Client{cli: cli, key: key, http: httpClient}
+	if key == "" {
+		c.budget = budget.New(UnsignedHourlyLimit, time.Hour, nil)
+	}
+	return c
 }
 
 // Signed anger om klienten signerar sina anrop.
@@ -83,7 +69,7 @@ func (c *Client) Signed() bool { return c.key != "" }
 
 // AllStations hämtar samtliga mätpunkter (luft) med namn, kommun, län och position.
 // Utelämnas p returnerar API:et alla mätpunkter; verbose ger de extra fälten.
-func (c *Client) AllStations(ctx context.Context) ([]Station, error) {
+func (c *Client) AllStations(ctx context.Context) ([]obs.Station, error) {
 	var resp apiResponse
 	if err := c.get(ctx, "verbose", &resp); err != nil {
 		return nil, err
@@ -92,8 +78,8 @@ func (c *Client) AllStations(ctx context.Context) ([]Station, error) {
 }
 
 func (c *Client) get(ctx context.Context, params string, out *apiResponse) error {
-	if !c.Signed() && !c.takeBudget() {
-		return ErrBudgetExhausted
+	if c.budget != nil && !c.budget.Take() {
+		return obs.ErrBudgetExhausted
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.buildURL(params), nil)
 	if err != nil {
@@ -134,29 +120,11 @@ func (c *Client) buildURL(params string) string {
 }
 
 // sign beräknar md5("<url utan https://>+<nyckel>") enligt API-dokumentationen.
+// MD5 är föreskrivet av API:et och skyddar ingenting av våra egna data, så det
+// ska inte bytas ut.
 func sign(unsignedURL, key string) string {
-	sum := md5.Sum([]byte(unsignedURL + "+" + key))
+	sum := md5.Sum([]byte(unsignedURL + "+" + key)) //nolint:gosec // se importen
 	return hex.EncodeToString(sum[:])
-}
-
-// takeBudget reserverar ett osignerat anrop om det finns utrymme den senaste timmen.
-func (c *Client) takeBudget() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	now := c.now()
-	cutoff := now.Add(-time.Hour)
-	kept := c.calls[:0]
-	for _, t := range c.calls {
-		if t.After(cutoff) {
-			kept = append(kept, t)
-		}
-	}
-	c.calls = kept
-	if len(c.calls) >= UnsignedHourlyLimit {
-		return false
-	}
-	c.calls = append(c.calls, now)
-	return true
 }
 
 type apiResponse struct {
@@ -174,10 +142,21 @@ type apiResponse struct {
 	} `json:"stations"`
 }
 
-func (r apiResponse) stations() []Station {
-	out := make([]Station, 0, len(r.Stations))
+// DecodeStations tolkar ett sparat svar från API:et (JSON) till mätpunkter.
+// Används av tnumock.
+func DecodeStations(r io.Reader) ([]obs.Station, error) {
+	var resp apiResponse
+	if err := json.NewDecoder(r).Decode(&resp); err != nil {
+		return nil, err
+	}
+	return resp.stations(), nil
+}
+
+func (r apiResponse) stations() []obs.Station {
+	out := make([]obs.Station, 0, len(r.Stations))
 	for _, s := range r.Stations {
-		out = append(out, Station{
+		out = append(out, obs.Station{
+			Source:     SourceName,
 			ID:         s.ID,
 			Title:      strings.TrimSpace(s.Title),
 			Temp:       s.Temp.ptr(),
@@ -185,11 +164,32 @@ func (r apiResponse) stations() []Station {
 			Lon:        s.Lon.ptr(),
 			Kommun:     s.Kommun,
 			Lan:        s.Lan,
-			LastUpdate: s.LastUpdate,
+			MeasuredAt: parseLocalTime(s.LastUpdate),
 			URL:        s.URL,
 		})
 	}
 	return out
+}
+
+var stockholm = mustLoadLocation("Europe/Stockholm")
+
+func mustLoadLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		panic("tnu: " + err.Error())
+	}
+	return loc
+}
+
+// parseLocalTime tolkar API:ets tidsangivelse, svensk lokal tid på formen
+// "2006-01-02 15:04:05", och returnerar den i UTC. Ogiltig eller tom tid ger
+// nolltid.
+func parseLocalTime(s string) time.Time {
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(s), stockholm)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 // flexFloat tolkar tal som API:et skickar antingen som tal eller som sträng

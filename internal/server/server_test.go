@@ -14,17 +14,18 @@ import (
 	"testing/fstest"
 	"time"
 
+	"temperatur/internal/obs"
 	"temperatur/internal/places"
-	"temperatur/internal/tnu"
+	"temperatur/internal/tnumock"
 )
 
 type countingSource struct {
-	tnu.Source
+	obs.Source
 	calls atomic.Int32
 	err   error
 }
 
-func (c *countingSource) AllStations(ctx context.Context) ([]tnu.Station, error) {
+func (c *countingSource) AllStations(ctx context.Context) ([]obs.Station, error) {
 	c.calls.Add(1)
 	if c.err != nil {
 		return nil, c.err
@@ -34,7 +35,7 @@ func (c *countingSource) AllStations(ctx context.Context) ([]tnu.Station, error)
 
 func newTestServer(t *testing.T, err error) (http.Handler, *countingSource) {
 	t.Helper()
-	mock, e := tnu.NewMock()
+	mock, e := tnumock.New()
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -110,7 +111,7 @@ func TestSearchReportsStaleData(t *testing.T) {
 		t.Fatal("stale ska vara false när hämtningarna fungerar")
 	}
 
-	mock, _ := tnu.NewMock()
+	mock, _ := tnumock.New()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	idx := staleIndex{places.NewIndex(mock, 5*time.Minute, log)}
 	srv, err := New(idx, fstest.MapFS{}, log)
@@ -140,7 +141,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestUpstreamErrors(t *testing.T) {
-	h, _ := newTestServer(t, tnu.ErrBudgetExhausted)
+	h, _ := newTestServer(t, obs.ErrBudgetExhausted)
 	if code, _ := get[map[string]string](t, h, "/api/search", "lund"); code != http.StatusServiceUnavailable {
 		t.Errorf("status %d, vill ha 503", code)
 	}
@@ -194,5 +195,70 @@ func TestStaticFiles(t *testing.T) {
 	}
 	if rec := serve("/"); rec.Header().Get("Cache-Control") != "no-cache" || rec.Header().Get("ETag") == "" {
 		t.Errorf("index.html ska alltid kontrolleras: %v", rec.Header())
+	}
+}
+
+func TestHealthz(t *testing.T) {
+	serve := func(h http.Handler) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		return rec
+	}
+
+	// Före första hämtningen: servern lever, men listan saknas ännu.
+	h, _ := newTestServer(t, nil)
+	rec := serve(h)
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Body.String(), "ok") || !strings.Contains(rec.Body.String(), "väntar") {
+		t.Errorf("före hämtning: %d %q", rec.Code, rec.Body)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("healthz får inte cachas: %q", rec.Header().Get("Cache-Control"))
+	}
+
+	// Efter en sökning är listan hämtad.
+	get[searchResponse](t, h, "/api/search", "Lund")
+	if rec := serve(h); rec.Body.String() != "ok" {
+		t.Errorf("efter hämtning: %q", rec.Body)
+	}
+
+	// Inaktuell lista ger fortfarande 200 men säger det.
+	mock, _ := tnumock.New()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	idx := staleIndex{places.NewIndex(mock, 5*time.Minute, log)}
+	srv, err := New(idx, fstest.MapFS{}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	get[searchResponse](t, srv.Handler(), "/api/search", "Lund")
+	rec = serve(srv.Handler())
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "inaktuell") {
+		t.Errorf("inaktuell: %d %q", rec.Code, rec.Body)
+	}
+}
+
+func TestAPICacheControl(t *testing.T) {
+	h, _ := newTestServer(t, nil)
+	for path, want := range map[string]string{"/api/search": cacheSearch, "/api/suggest": cacheSuggest} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path+"?q=Lund", nil))
+		if got := rec.Header().Get("Cache-Control"); got != want {
+			t.Errorf("%s: Cache-Control %q, vill ha %q", path, got, want)
+		}
+	}
+}
+
+func TestSearchReturnsSourceAndMeasuredAt(t *testing.T) {
+	h, _ := newTestServer(t, nil)
+	_, body := get[searchResponse](t, h, "/api/search", "Lund")
+	if len(body.Stations) == 0 || body.Stations[0].Source == "" || body.Stations[0].MeasuredAt.IsZero() {
+		t.Errorf("källa och mättid ska följa med: %+v", body.Stations[0])
+	}
+}
+
+func TestValidationMessageUsesLimits(t *testing.T) {
+	h, _ := newTestServer(t, nil)
+	_, body := get[map[string]string](t, h, "/api/search", "a")
+	if want := "Skriv mellan 2 och 50 tecken."; body["error"] != want {
+		t.Errorf("felmeddelande %q, vill ha %q", body["error"], want)
 	}
 }

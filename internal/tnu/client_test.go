@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"temperatur/internal/budget"
+	"temperatur/internal/obs"
 )
 
 // Exemplet ur API-dokumentationen; förväntat värde framräknat med Pythons hashlib.
@@ -73,8 +76,11 @@ func TestAllStationsParsesResponse(t *testing.T) {
 	s := stations[0]
 	if s.ID != "askarback" || s.Title != "Askarbäck" || s.Kommun != "Uppsala kommun" ||
 		s.Temp == nil || *s.Temp != 15.7 || s.Lat == nil || *s.Lat != 60.031732 ||
-		s.URL != "https://www.temperatur.nu/askarback" {
+		s.URL != "https://www.temperatur.nu/askarback" || s.Source != SourceName {
 		t.Errorf("första mätpunkten tolkades fel: %+v", s)
+	}
+	if s.MeasuredAt.IsZero() || s.MeasuredAt.Location() != time.UTC {
+		t.Errorf("mättiden ska vara tolkad och i UTC: %v", s.MeasuredAt)
 	}
 	if stations[8].Title != "Lill-moga" {
 		t.Errorf("namn ska trimmas: %q", stations[8].Title)
@@ -120,15 +126,15 @@ func TestUnsignedBudget(t *testing.T) {
 	var reqs []string
 	c := fixtureClient(t, "", `{"client":"unsigned","stations":[]}`, &reqs)
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	c.now = func() time.Time { return now }
+	c.budget = budget.New(UnsignedHourlyLimit, time.Hour, func() time.Time { return now })
 
 	for i := range UnsignedHourlyLimit {
 		if _, err := c.AllStations(context.Background()); err != nil {
 			t.Fatalf("anrop %d: %v", i+1, err)
 		}
 	}
-	if _, err := c.AllStations(context.Background()); !errors.Is(err, ErrBudgetExhausted) {
-		t.Fatalf("err = %v, vill ha ErrBudgetExhausted", err)
+	if _, err := c.AllStations(context.Background()); !errors.Is(err, obs.ErrBudgetExhausted) {
+		t.Fatalf("err = %v, vill ha obs.ErrBudgetExhausted", err)
 	}
 	if len(reqs) != UnsignedHourlyLimit {
 		t.Fatalf("%d anrop gick iväg, max är %d", len(reqs), UnsignedHourlyLimit)
@@ -150,13 +156,23 @@ func TestSignedHasNoLocalBudget(t *testing.T) {
 	}
 }
 
-func TestMockLoadsAllStations(t *testing.T) {
-	m, err := NewMock()
-	if err != nil {
-		t.Fatal(err)
+// API:et anger svensk lokal tid; modellen ska ha UTC, med rätt förskjutning
+// både sommar och vinter.
+func TestParseLocalTime(t *testing.T) {
+	tests := []struct {
+		in   string
+		want time.Time
+	}{
+		{"2026-10-05 18:39:00", time.Date(2026, 10, 5, 16, 39, 0, 0, time.UTC)},   // sommartid, UTC+2
+		{"2026-12-05 18:39:00", time.Date(2026, 12, 5, 17, 39, 0, 0, time.UTC)},   // normaltid, UTC+1
+		{" 2026-12-05 18:39:00 ", time.Date(2026, 12, 5, 17, 39, 0, 0, time.UTC)}, // blanksteg trimmas
+		{"", time.Time{}},
+		{"N/A", time.Time{}},
+		{"2026-10-05", time.Time{}},
 	}
-	stations, _ := m.AllStations(context.Background())
-	if len(stations) < 1000 {
-		t.Fatalf("fick bara %d mätpunkter", len(stations))
+	for _, tt := range tests {
+		if got := parseLocalTime(tt.in); !got.Equal(tt.want) {
+			t.Errorf("parseLocalTime(%q) = %v, vill ha %v", tt.in, got, tt.want)
+		}
 	}
 }

@@ -16,15 +16,23 @@ Besökare → Cloudflare → Cloudflare Tunnel → nginx (egen container) → ap
 
 ### Backend – Go
 
-- `main.go` läser inställningar från miljövariabler, startar bakgrundsuppdateringen och HTTP-servern och stänger ned snyggt.
-- `internal/tnu/` är klienten mot temperatur.nu. Den sköter signering, anropsbudget och mock-data (`TNU_MOCK=1`).
-- `internal/places/` håller cachen och sökindexet. Svaren från API:erna cachas på servern och förnyas i bakgrunden. Besökare läser alltid från cachen och väntar aldrig på en extern källa. Sök, förslag och felstavning körs lokalt mot cachen och kostar inga API-anrop.
-- `internal/server/` innehåller endpoints (`/api/search`, `/api/suggest`, `/healthz`), statiska filer och säkerhetsrubriker (CSP m.m.).
+- `main.go` väljer källa (`newSource`), startar bakgrundsuppdateringen och HTTP-servern och stänger ned snyggt. `temperatur healthcheck` anropar `/healthz` och används av Docker `HEALTHCHECK` (imagen saknar curl).
+- `internal/config/` läser och kontrollerar miljövariablerna (`config.Load`).
+- `internal/obs/` är den källneutrala modellen: `obs.Station` (med `Source`, `MeasuredAt` som `time.Time` i UTC och källans `URL`), gränssnittet `obs.Source` och felet `obs.ErrBudgetExhausted`. Resten av programmet känner bara till `obs`, aldrig till en enskild källas typer.
+- `internal/tnu/` är klienten mot temperatur.nu. Den sköter signering och översätter svaren till `obs.Station`. `internal/budget/` räknar anrop per tidsfönster (osignerade anrop: högst 25/timme).
+- `internal/feed/` hämtar data från en källa i bakgrunden (`feed.Feed[T]`): intervall, aldrig tidigare omförsök än ett intervall (femminutersregeln, även efter fel), en delad första hämtning, senast lyckade värdet kvar vid fel, inaktuell-flagga efter flera misslyckanden i rad och panikskydd. Varje källa får en egen `Feed`.
+- `internal/places/` bygger sökindexet av mätpunkterna (`snapshot.go`), normaliserar namn (`fold.go`, `data.go`), rankar (`rank.go`) och matchar feltolerant (`matcher.go`, `distance.go`). Besökare läser alltid från cachen och väntar aldrig på en extern källa. Sök, förslag och felstavning körs lokalt mot cachen och kostar inga API-anrop.
+- `internal/server/` innehåller endpoints (`handlers.go`: `/api/search`, `/api/suggest`, `/healthz`), statiska filer (`static.go`) och säkerhetsrubriker med CSP (`headers.go`).
+- `internal/tnumock/` har sparade svar från temperatur.nu för utveckling och tester. Den importeras bara av `mock_on.go` (byggtagg `mock`), så `TNU_MOCK=1` fungerar bara med `go run -tags mock .` och finns inte i produktionsbinären.
 - Frontendfilerna bäddas in i binären med `go:embed`, så det finns bara en binär att driftsätta.
+
+### Namn i koden
+
+Domänbegrepp som kommer från temperatur.nu och svenska orter heter som i svenskan (`kommun`, `ort`, `plats`, `ortName`, `kommunNames`). Allt annat – tekniska begrepp, typer och funktioner (`Feed`, `Snapshot`, `Budget`, `respond`) – har engelska namn. Kommentarer och felmeddelanden är på svenska.
 
 ### Flera källor (målbild)
 
-- Varje källa är ett eget paket under `internal/` som implementerar ett gemensamt gränssnitt (jfr `tnu.Source`). Källan följer sina egna API-villkor, med eget uppdateringsintervall, egen anropsbudget och egen signering.
+- Varje källa är ett eget paket under `internal/` som implementerar ett gemensamt gränssnitt (`obs.Source`, jfr `tnu.Client`) och körs i en egen `feed.Feed`. Källan följer sina egna API-villkor, med eget uppdateringsintervall, egen anropsbudget och egen signering.
 - Varje källa har en egen cache och hämtas i bakgrunden. Om en källa är nere eller långsam ska de andra inte påverkas, och då visas senast kända data, markerade som gamla.
 - Ett eget lager slår ihop källorna per plats till ett samlat resultat. Det vägs efter avstånd och ålder på mätningen, och extremvärden sorteras bort. Svaret visar vilka källor som ingår och hur mycket de skiljer sig åt.
 - Varje källa ska ha källhänvisning i gränssnittet om dess villkor kräver det.

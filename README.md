@@ -4,10 +4,10 @@ Sök en ort och se aktuell temperatur från mätpunkterna där – och en gubbe 
 
 ## Köra lokalt
 
-Med sparade svar (förbrukar ingen anropskvot):
+Med sparade svar (förbrukar ingen anropskvot; kräver `-tags mock`, som aldrig används i produktionsbygget):
 
 ```
-TNU_MOCK=1 go run .
+TNU_MOCK=1 go run -tags mock .
 ```
 
 Mot det riktiga API:et: kopiera `.env.example` till `.env`, fyll i `TNU_CLI` och kör

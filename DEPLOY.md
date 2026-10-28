@@ -132,9 +132,11 @@ cd ~/Projects/ai-kurs
 sudo docker compose up -d --build
 sudo docker compose ps                       # STATUS ska vara "Up"
 sudo docker compose logs --tail 20
-curl -s http://127.0.0.1:8080/healthz        # ska svara "ok"
+curl -s http://127.0.0.1:8080/healthz        # svarar "ok" (se nedan)
 curl -s "http://127.0.0.1:8080/api/search?q=Lund" | head -c 200; echo
 ```
+
+`/healthz` svarar alltid 200 så länge processen lever, med texten `ok`, `ok: väntar på första hämtningen` (precis efter start) eller `ok: listan kan vara inaktuell` (flera hämtningar i rad har misslyckats). Docker kör samma kontroll själv (`HEALTHCHECK`, se `docker compose ps` – STATUS ska säga `healthy`).
 
 I loggen ska det stå `hämtade alla mätpunkter antal=…` inom några sekunder. Saknas nyckeln står det också `osignerade anrop` – det är väntat tills du lagt in `TNU_CLI_KEY`.
 
@@ -182,7 +184,7 @@ git checkout main                 # när felet är rättat och du vill tillbaka
 ## 9. Löpande drift
 
 - **Övervakning:** Lägg upp en extern koll mot `https://temperatur.pilros.se/healthz` (t.ex. UptimeRobot) som larmar om sajten inte svarar.
-- **Loggar:** `sudo docker compose logs -f` här, och `nginx`/`cloudflared` i `~/Projects/server`. Håll utkik efter `listan räknas nu som inaktuell` – då har hämtningen från temperatur.nu misslyckats fyra gånger i rad och sajten visar en varning för besökarna.
+- **Loggar:** `sudo docker compose logs -f` här, och `nginx`/`cloudflared` i `~/Projects/server`. Håll utkik efter `datan räknas nu som inaktuell` – då har hämtningen från temperatur.nu misslyckats fyra gånger i rad och sajten visar en varning för besökarna.
 - **Säkerhetskopiering:** Det som inte går att återskapa från repona är `.env` och `~/Projects/server/tunnel.env`. Spara dem på ett säkert ställe. Läcker tunnelns token: skapa en ny i Cloudflare, lägg in den i `tunnel.env` och starta om `cloudflared`.
 
 ## 10. Felsökning
@@ -199,6 +201,13 @@ git checkout main                 # när felet är rättat och du vill tillbaka
 | `usermod: command not found` som root | Root via `su` utan bindestreck | `su -`, eller `/usr/sbin/usermod` |
 | Gul varning "Temperaturerna kan vara inaktuella" | Fyra misslyckade hämtningar i rad | Loggen visar orsaken; kontrollera nätverket och att klienten inte är blockerad hos temperatur.nu |
 | Loggen säger `klienten är blockerad` | temperatur.nu har blockerat `cli` | Kontakta temperatur.nu; skaffa/lägg in `TNU_CLI_KEY` |
+
+## CI/CD (GitHub Actions)
+
+- **`.github/workflows/ci.yml`** körs för varje PR och push till `main`: formatering, `go vet`, `go test -race` (inklusive kontrasttestet), benchmarken för `Suggest`, `govulncheck`, `golangci-lint` samt Docker-bygge med Trivy-skanning.
+- **`.github/workflows/publish.yml`** körs efter merge till `main`: bygger imagen, skannar den och publicerar den på GHCR som `ghcr.io/<ägare>/<repo>:<commit-SHA>`.
+- Actions är låsta till commit-SHA (Dependabot föreslår uppdateringar) och workflows har minsta möjliga `permissions`. Inga hemligheter används av CI; `publish` använder bara det inbyggda `GITHUB_TOKEN`.
+- **Driftsättningen på servern är inte automatiserad än.** Servern har inga öppna portar, så den måste hämta nya imagar själv: antingen en self-hosted runner som bara kör jobb från `main`, eller en tjänst på servern som hämtar nya taggar. Efter driftsättningen ska `/healthz` kontrolleras och föregående image återställas om den inte svarar. Tills dess gäller steg 8 ovan.
 
 ## Innan adressen sprids
 
