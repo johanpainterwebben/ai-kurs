@@ -17,7 +17,6 @@ func fold(s string) string {
 	return strings.Join(strings.Fields(foldReplacer.Replace(strings.ToLower(s))), " ")
 }
 
-// withAliases lägger till alias för förkortningar som finns i texten.
 func withAliases(folded string) string {
 	for _, w := range strings.Fields(folded) {
 		if a, ok := aliases[w]; ok {
@@ -54,7 +53,6 @@ func splitTitle(title string) (ort, plats string) {
 	return clean(ort), clean(plats)
 }
 
-// ortName är ortdelen av en mätpunkts namn: "Lund/Värpinge" → "Lund".
 func ortName(title string) string {
 	ort, _ := splitTitle(title)
 	return ort

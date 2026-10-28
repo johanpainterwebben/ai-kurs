@@ -17,7 +17,6 @@ const (
 	KindPlats  Kind = "plats"
 )
 
-// order ger kommuner företräde framför orter, och orter framför platser.
 func (k Kind) order() int {
 	switch k {
 	case KindKommun:
@@ -55,9 +54,6 @@ type place struct {
 	stations []int    // index i Snapshot.stations
 }
 
-// newSnapshot bygger sökbara platser av mätpunkterna: först grupperas de till
-// kommuner, orter och platser, sedan slås dubbletter ihop, och till sist
-// görs platserna redo för sökning.
 func newSnapshot(stations []obs.Station, fetchedAt time.Time) *Snapshot {
 	g := groupStations(stations)
 	g.mergeSameNamedPlatser()
@@ -189,9 +185,8 @@ func (g *groups) platsPlaces() []place {
 	return out
 }
 
-// finalize fyller i det som alla platser har gemensamt (sökväg, antal,
-// matchningsnycklar), sorterar mätpunkterna inom varje plats och platserna
-// inbördes: kommuner före orter före platser.
+// finalize sorterar platserna så att kommuner kommer före orter och orter före
+// platser; resolve förlitar sig på ordningen.
 func (s *Snapshot) finalize() {
 	for i := range s.places {
 		p := &s.places[i]
@@ -208,7 +203,6 @@ func (s *Snapshot) finalize() {
 	})
 }
 
-// onlyInKommun anger att alla mätpunkterna ligger i kommunen.
 func onlyInKommun(stations []obs.Station, idx []int, kommun string) bool {
 	for _, i := range idx {
 		if stations[i].Kommun != kommun {

@@ -38,22 +38,20 @@ const (
 // matchar via orten. En träff via orten ("lund" för "Lund/Tre Högars väg")
 // hamnar därmed efter kommuner och orter, så att de inte trängs undan av alla
 // platser i orten. Straffet gör också att den delar rang med en träff med ett
-// skrivfel; det är avsiktligt, och kindOrder avgör sedan i rank.
+// skrivfel; det är avsiktligt, och Kind.order avgör sedan i rank.
 const viaOrtPenalty = 3
 
 // matchScore rangordnar hur väl en fråga matchar en plats; lägre är bättre.
 type matchScore struct {
 	class  matchClass
-	typos  uint8 // antal skrivfel, för classTypo
-	viaOrt bool  // frågan matchar bara via ortens namn
+	typos  uint8
+	viaOrt bool // frågan matchar bara via ortens namn
 }
 
-// fuzzy anger att träffen bygger på ett skrivfel.
 func (s matchScore) fuzzy() bool { return s.class == classTypo }
 
 // weight är rangen som ett tal: -1 för exakt, 0 för början av namnet, 1 för
-// början av ett ord, 2 för någonstans i namnet och 2+n för n skrivfel. En
-// träff via orten ligger viaOrtPenalty steg längre ned.
+// början av ett ord, 2 för någonstans i namnet och 2+n för n skrivfel.
 func (s matchScore) weight() int {
 	var w int
 	switch s.class {
@@ -76,15 +74,15 @@ func (s matchScore) cmp(o matchScore) int { return cmp.Compare(s.weight(), o.wei
 // sökning och återanvänder sina buffertar, så att en jämförelse inte
 // allokerar minne – förslagen anropas vid varje tangenttryckning.
 type matcher struct {
-	q     []rune
-	qs    string // q som sträng
-	qWord string // " " + q, för träff i början av ett ord
-	typos int
-	rows  [3][]int // de tre senaste raderna i prefixDistance
+	q            []rune
+	qString      string
+	qAtWordStart string // " " + q, träffar i början av ett ord
+	typos        int
+	rows         [3][]int // återanvänds av prefixDistance
 }
 
 func newMatcher(q string) *matcher {
-	m := &matcher{q: []rune(q), qs: q, qWord: " " + q}
+	m := &matcher{q: []rune(q), qString: q, qAtWordStart: " " + q}
 	m.typos = maxTypos(len(m.q))
 	for i := range m.rows {
 		m.rows[i] = make([]int, len(m.q)+2)
@@ -109,7 +107,6 @@ func (m *matcher) match(p *place) (matchScore, bool) {
 	return m.scoreKey(p.full)
 }
 
-// maxTypos är hur många skrivfel som tillåts för en fråga av given längd.
 func maxTypos(n int) int {
 	switch {
 	case n < 4:
@@ -121,14 +118,13 @@ func maxTypos(n int) int {
 	}
 }
 
-// scoreKey rangordnar hur väl frågan matchar k.
 func (m *matcher) scoreKey(k matchKey) (matchScore, bool) {
 	switch {
-	case strings.HasPrefix(k.str, m.qs):
+	case strings.HasPrefix(k.str, m.qString):
 		return matchScore{class: classPrefix}, true
-	case strings.Contains(k.str, m.qWord):
+	case strings.Contains(k.str, m.qAtWordStart):
 		return matchScore{class: classWord}, true
-	case strings.Contains(k.str, m.qs):
+	case strings.Contains(k.str, m.qString):
 		return matchScore{class: classContains}, true
 	case m.typos == 0:
 		return matchScore{}, false

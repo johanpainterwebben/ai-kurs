@@ -11,7 +11,6 @@ import (
 	"temperatur/internal/places"
 )
 
-// Gränser för frågor och svar.
 const (
 	minQueryLen    = 2
 	maxQueryLen    = 50

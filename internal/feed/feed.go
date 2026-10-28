@@ -143,7 +143,7 @@ func (f *Feed[T]) refresh(done chan struct{}) {
 
 	f.mu.Lock()
 	if err == nil {
-		f.value, f.loaded = v, true // en misslyckad hämtning lämnar förra värdet orört
+		f.value, f.loaded = v, true
 		if f.failures > StaleAfterFailures {
 			f.log.Info("hämtningarna fungerar igen", "källa", f.name, "misslyckade_i_rad", f.failures)
 		}

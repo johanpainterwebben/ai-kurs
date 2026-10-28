@@ -99,7 +99,6 @@ func run(log *slog.Logger) error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-// newSource väljer källa utifrån inställningarna. Fler källor läggs till här.
 func newSource(cfg config.Config, log *slog.Logger) (obs.Source, error) {
 	if cfg.Mock {
 		return newMockSource(log)

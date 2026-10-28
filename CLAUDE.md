@@ -21,7 +21,7 @@ Besökare → Cloudflare → Cloudflare Tunnel → nginx (egen container) → ap
 - `internal/obs/` är den källneutrala modellen: `obs.Station` (med `Source`, `MeasuredAt` som `time.Time` i UTC och källans `URL`), gränssnittet `obs.Source` och felet `obs.ErrBudgetExhausted`. Resten av programmet känner bara till `obs`, aldrig till en enskild källas typer.
 - `internal/tnu/` är klienten mot temperatur.nu. Den sköter signering och översätter svaren till `obs.Station`. `internal/budget/` räknar anrop per tidsfönster (osignerade anrop: högst 25/timme).
 - `internal/feed/` hämtar data från en källa i bakgrunden (`feed.Feed[T]`): intervall, aldrig tidigare omförsök än ett intervall (femminutersregeln, även efter fel), en delad första hämtning, senast lyckade värdet kvar vid fel, inaktuell-flagga efter flera misslyckanden i rad och panikskydd. Varje källa får en egen `Feed`.
-- `internal/places/` bygger sökindexet av mätpunkterna (`snapshot.go`), normaliserar namn (`fold.go`, `data.go`), rankar (`rank.go`) och matchar feltolerant (`matcher.go`, `distance.go`). Besökare läser alltid från cachen och väntar aldrig på en extern källa. Sök, förslag och felstavning körs lokalt mot cachen och kostar inga API-anrop.
+- `internal/places/` bygger sökindexet av mätpunkterna (`snapshot.go`), normaliserar namn (`fold.go`, `data.go`), rankar (`rank.go`) och matchar feltolerant (`matcher.go`, `distance.go`). `index.go` kopplar sökindexet till en `feed.Feed`. Besökare läser alltid från cachen och väntar aldrig på en extern källa. Sök, förslag och felstavning körs lokalt mot cachen och kostar inga API-anrop.
 - `internal/server/` innehåller endpoints (`handlers.go`: `/api/search`, `/api/suggest`, `/healthz`), statiska filer (`static.go`) och säkerhetsrubriker med CSP (`headers.go`).
 - `internal/tnumock/` har sparade svar från temperatur.nu för utveckling och tester. Den importeras bara av `mock_on.go` (byggtagg `mock`), så `TNU_MOCK=1` fungerar bara med `go run -tags mock .` och finns inte i produktionsbinären.
 - Frontendfilerna bäddas in i binären med `go:embed`, så det finns bara en binär att driftsätta.
@@ -57,12 +57,12 @@ Domänbegrepp som kommer från temperatur.nu och svenska orter heter som i svens
 - **nginx** körs i en egen container och tar emot trafiken från **Cloudflare Tunnel** (`cloudflared`). Servern har inga öppna inkommande portar. Konfigurationen för nginx och tunneln ligger i repot `~/Projects/server`.
 - Hemligheter (`TNU_CLI`, `TNU_CLI_KEY` och nycklar för framtida källor) ligger i `.env` på servern och ska aldrig checkas in.
 
-### CI/CD (saknas i dag – ska upprättas)
+### CI/CD
 
-Verktyget ska vara **GitHub Actions**, eftersom repot redan ligger på GitHub.
+Verktyget är **GitHub Actions**. `.github/workflows/ci.yml` (Go-kontroller, `golangci-lint`, Docker-bygge med Trivy) och `publish.yml` (bygger och publicerar imagen på GHCR) finns redan. Det som återstår är frontend-stegen (väntar på Svelte) och automatisk driftsättning med återställning; se DEPLOY.md. Målbilden:
 
 - **Vid varje PR och push:**
-  - Go: `go vet ./...`, `go test -race ./...`, benchmarken för `Suggest` och `govulncheck`.
+  - Go: `go vet ./...`, `go test -race ./...`, benchmarken för `Suggest`, `govulncheck` och `golangci-lint` (`.golangci.yml`; ett rött lint-steg blockerar).
   - Frontend: bygge, `svelte-check`, lint och `npm audit`.
   - Kontrasttestet.
   - Docker-bygge med sårbarhetsskanning av imagen (t.ex. Trivy).
@@ -74,6 +74,7 @@ Verktyget ska vara **GitHub Actions**, eftersom repot redan ligger på GitHub.
 - **Säkerhet (OWASP Top 10) är viktigt.** Det gäller både backend, frontend, Docker och CI/CD.
 - **Prestanda är viktigt.** Svar till besökare kommer alltid från cachen på servern, och sidan ska vara lätt och cachebar.
 - **Tillgänglighet:** WCAG på högsta nivå (AAA) för läsbarhet och kontrast.
+- **Läsbar kod före kommentarer.** Koden ska gå att förstå utan kommentarer: tydliga namn, små funktioner som gör en sak och namngivna konstanter i stället för magiska tal. Kommentera inte det koden redan säger. Skriv bara en kommentar när den förklarar *varför* (ett API-villkor, en säkerhetsregel, ett medvetet val eller en inte uppenbar invariant). Vill du skriva en kommentar för att förklara vad koden gör, döp om eller bryt ut en funktion i stället. Doc-kommentarer på exporterade namn och paket behålls.
 - **API-villkor** för varje källa följs alltid, även efter fel, krascher och omstarter.
 
 ## Granska efter varje större ändring
@@ -84,7 +85,7 @@ Minst detta ska kontrolleras:
 
 **Säkerhet / OWASP**
 - XSS: data från API:et eller användaren sätts bara med `textContent`/attribut, aldrig `innerHTML` (i Svelte: aldrig `{@html}` med sådan data). Länkar från API:et valideras (`isTnuURL`).
-- CSP och säkerhetsrubriker i `internal/server/server.go` är kvar och blockerar inget som sidan behöver (inga CSP-fel i webbläsarkonsolen).
+- CSP och säkerhetsrubriker i `internal/server/headers.go` är kvar och blockerar inget som sidan behöver (inga CSP-fel i webbläsarkonsolen).
 - Injektion/SSRF: användarens text används aldrig i anrop mot temperatur.nu eller andra källor.
 - Hemligheter: `cli`, e-post, nycklar och `sign` läcker inte till loggar, felmeddelanden eller CI-loggar. `.env` och `__debug_bin*` är inte incheckade (`git ls-files`).
 - Statiska filer: ingen katalogvisning, ETag/cache fungerar.

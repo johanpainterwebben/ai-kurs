@@ -67,8 +67,8 @@ func NewClient(cli, key string, httpClient *http.Client) *Client {
 // Signed anger om klienten signerar sina anrop.
 func (c *Client) Signed() bool { return c.key != "" }
 
-// AllStations hämtar samtliga mätpunkter (luft) med namn, kommun, län och position.
-// Utelämnas p returnerar API:et alla mätpunkter; verbose ger de extra fälten.
+// AllStations hämtar samtliga mätpunkter med ett enda anrop. "verbose" ger
+// kommun, län och position.
 func (c *Client) AllStations(ctx context.Context) ([]obs.Station, error) {
 	var resp apiResponse
 	if err := c.get(ctx, "verbose", &resp); err != nil {
@@ -110,7 +110,7 @@ func (c *Client) get(ctx context.Context, params string, out *apiResponse) error
 	return nil
 }
 
-// buildURL lägger till cli och, om nyckel finns, sign som sista parameter.
+// buildURL lägger sign sist, eftersom API:et kräver det.
 func (c *Client) buildURL(params string) string {
 	u := endpoint + "?" + params + "&cli=" + url.QueryEscape(c.cli)
 	if c.key != "" {
@@ -119,9 +119,7 @@ func (c *Client) buildURL(params string) string {
 	return "https://" + u
 }
 
-// sign beräknar md5("<url utan https://>+<nyckel>") enligt API-dokumentationen.
-// MD5 är föreskrivet av API:et och skyddar ingenting av våra egna data, så det
-// ska inte bytas ut.
+// sign använder MD5 eftersom API:et föreskriver det; det ska inte bytas ut.
 func sign(unsignedURL, key string) string {
 	sum := md5.Sum([]byte(unsignedURL + "+" + key)) //nolint:gosec // se importen
 	return hex.EncodeToString(sum[:])
@@ -181,9 +179,8 @@ func mustLoadLocation(name string) *time.Location {
 	return loc
 }
 
-// parseLocalTime tolkar API:ets tidsangivelse, svensk lokal tid på formen
-// "2006-01-02 15:04:05", och returnerar den i UTC. Ogiltig eller tom tid ger
-// nolltid.
+// parseLocalTime tolkar API:ets svenska lokaltid och returnerar UTC. Ogiltig
+// eller tom tid ger nolltid.
 func parseLocalTime(s string) time.Time {
 	t, err := time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(s), stockholm)
 	if err != nil {

@@ -102,7 +102,6 @@ function render(data) {
   document.getElementById("summary-title").textContent = place.label;
   document.getElementById("summary-detail").textContent = place.detail;
 
-  // Servern säger till när flera hämtningar i rad har misslyckats.
   if (data.stale) {
     document.getElementById("stale-text").textContent =
       `Det har varit problem att hämta ny data från temperatur.nu. Det som visas hämtades ${formatFetched(data.fetchedAt)}.`;
@@ -129,17 +128,15 @@ function render(data) {
     summaryLink.hidden = true;
     list.replaceChildren(...data.stations.map(stationItem));
   }
-  // Listen upptill på kortet får temperaturens färg.
   const shownTemp = total === 1 ? data.stations[0].temp : data.average;
   summaryEl.dataset.level = shownTemp == null ? "none" : tempLevel(shownTemp);
   showWeather(shownTemp);
   summaryEl.hidden = false;
 
-  // Kort sammanfattning för skärmläsare; resten finns i kortet och listan.
-  const temp = data.average == null ? "värde saknas" : formatTemp(data.average);
-  const summary = total === 1 ? temp : `${count}, ${data.average == null ? temp : `snitt ${temp}`}`;
-  const stale = data.stale ? ` Obs: datan kan vara inaktuell, den hämtades ${formatFetched(data.fetchedAt)}.` : "";
-  showStatus(`${place.label}: ${summary}.${stale}`, { visuallyHidden: true });
+  const tempText = data.average == null ? "värde saknas" : formatTemp(data.average);
+  const spokenSummary = total === 1 ? tempText : `${count}, ${data.average == null ? tempText : `snitt ${tempText}`}`;
+  const staleNotice = data.stale ? ` Obs: datan kan vara inaktuell, den hämtades ${formatFetched(data.fetchedAt)}.` : "";
+  showStatus(`${place.label}: ${spokenSummary}.${staleNotice}`, { visuallyHidden: true });
 }
 
 function renderDidYouMean(places) {
@@ -233,14 +230,9 @@ function showStatus(text, { error = false, visuallyHidden = false } = {}) {
 }
 
 // ---- Gubben ----
-// Gubben i rubriken är på väg ut ur ett hus och klär sig efter temperaturen
-// på platsen man sökt på:
-// t-shirt och långbyxor vid 15–20°, mer kläder ned mot −20° och mindre upp
-// mot +40° (men aldrig naken – och svettig). Snö på taket och i luften när
-// det är kallt, sol när det är varmt. Varje plagg är ett <g data-item="…"> i SVG:n i
-// index.html.
+// Varje plagg är ett <g data-item="…"> i SVG:n i index.html.
 
-// Klädnivåer från kallast till varmast; max är övre gräns i °C.
+// Från kallast till varmast; max är övre gräns i °C.
 const OUTFITS = [
   { max: -12, items: ["pants", "boots", "puffer", "mittens", "scarf", "beanie", "rosy", "breath", "snow"], text: "dunjacka, halsduk, mössa, vantar och kängor" },
   { max: -4, items: ["pants", "boots", "puffer", "mittens", "scarf", "beanie", "snow"], text: "dunjacka, halsduk, mössa, vantar och kängor" },
@@ -254,11 +246,9 @@ const OUTFITS = [
   { max: Infinity, items: ["shorts", "sandals", "tank", "sunhat", "sunglasses", "sweat", "sweat-more", "rosy", "sun"], text: "linne, shorts, solhatt och solglasögon – och svettas mycket" },
 ];
 
-// NEUTRAL_TEMP ger utgångsklädseln innan man sökt eller när värde saknas.
+// Utgångsklädseln innan man sökt eller när värde saknas.
 const NEUTRAL_TEMP = 17;
 
-// showWeather låter gubben och (i ljust läge) himlen spegla temperaturen t.
-// Utan t visas utgångsläget.
 function showWeather(t) {
   dressFigure(t);
   if (t == null) {
@@ -268,7 +258,6 @@ function showWeather(t) {
   }
 }
 
-// dressFigure klär gubben för temperaturen t (eller utgångsläget om t saknas).
 function dressFigure(t) {
   const outfit = OUTFITS.find((o) => (t ?? NEUTRAL_TEMP) <= o.max);
   for (const g of figureEl.querySelectorAll("[data-item]")) {
@@ -280,8 +269,6 @@ function dressFigure(t) {
 }
 
 // ---- Förslag medan man skriver ----
-// Förslagen räknas fram på servern ur en lokal lista med alla mätpunkter,
-// så de kostar inga anrop mot temperatur.nu.
 
 input.addEventListener("input", () => {
   clearTimeout(suggestTimer);
@@ -422,7 +409,6 @@ function isTnuURL(u) {
   }
 }
 
-// formatFetched visar när listan hämtades: "kl. 18:40" i dag, annars med datum.
 function formatFetched(iso) {
   const d = new Date(iso);
   const sameDay = d.toDateString() === new Date().toDateString();
@@ -445,7 +431,6 @@ function formatUpdated(iso) {
   return date === stockholmDate.format(new Date()) ? `kl. ${hhmm}` : `${date} ${hhmm}`;
 }
 
-// joinWith(["a","b","c"], ", ", " eller ") → ["a", ", ", "b", " eller ", "c"]
 function joinWith(nodes, sep, lastSep) {
   return nodes.flatMap((n, i) => (i === 0 ? [n] : [i === nodes.length - 1 ? lastSep : sep, n]));
 }

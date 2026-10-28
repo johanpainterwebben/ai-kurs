@@ -62,9 +62,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// query läser och normaliserar q-parametern och kontrollerar längden.
-// Styrtecken (t.ex. NUL) hör aldrig hemma i ett ortnamn och avvisas, så att
-// de inte når loggar eller annan kod.
+// query avvisar styrtecken (t.ex. NUL) så att de inte når loggar eller annan kod.
 func query(r *http.Request) (string, bool) {
 	q := strings.Join(strings.Fields(r.URL.Query().Get("q")), " ")
 	if strings.IndexFunc(q, unicode.IsControl) >= 0 || !utf8.ValidString(q) {
@@ -74,8 +72,6 @@ func query(r *http.Request) (string, bool) {
 	return q, n >= minQueryLen && n <= maxQueryLen
 }
 
-// respond hämtar listan med mätpunkter och svarar med det answer ger, eller
-// med ett felsvar om listan saknas.
 func (s *Server) respond(w http.ResponseWriter, r *http.Request, cacheControl string, answer func(*places.Snapshot) any) {
 	snap, ok := s.snapshot(w, r)
 	if !ok {
@@ -85,7 +81,6 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, cacheControl st
 	s.writeJSON(w, http.StatusOK, answer(snap))
 }
 
-// snapshot hämtar listan med mätpunkter och skriver ett felsvar om den saknas.
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) (*places.Snapshot, bool) {
 	snap, err := s.index.Get(r.Context())
 	switch {
