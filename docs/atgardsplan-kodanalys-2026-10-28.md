@@ -1,23 +1,26 @@
-# Åtgärdsplan för kodanalysen: filer, ändringar och ordning
+# Åtgärdsplan för kodanalysen: filer, ändringar, ordning och status
 
-Datum: 2026-10-28. **Inget av detta är genomfört.** Planen bygger på fynden i
+Planerad 2026-10-28, status uppdaterad 2026-11-17. Planen bygger på fynden i
 [kodanalys-teknisk-skuld-2026-10-28.md](kodanalys-teknisk-skuld-2026-10-28.md); siffrorna i
-parentes (F1–F20) pekar på numren där.
+parentes (F1–F20) pekar på numren där. För genomförda steg beskrivs vad som faktiskt gjordes; för
+steg som är kvar beskrivs planen.
+
+Allt om CI/CD och driftsättning finns i [plan-cicd-2026-11-17.md](plan-cicd-2026-11-17.md).
 
 Varje steg är tänkt som en egen PR som kan granskas och rullas tillbaka för sig. Efter varje steg
 gäller kontrollerna sist i dokumentet.
 
 ## Översikt
 
-| Steg | Mål | Fynd | Storlek |
-|---|---|---|---|
-| 1 | Persistera femminutersregeln och timbudgeten | F1 | liten |
-| 2 | Källneutral modell, mättid som `time.Time` | F2, F4 | medel |
-| 3 | Per-källa-schemaläggare | F3 | medel |
-| 4 | Dela upp `match.go`, typad poäng, `Kind`-konstant | F5–F8 | medel |
-| 5 | Frontend: ren logik, temperaturtabell, delade konstanter | F9–F11, F15 | medel |
-| 6 | Server och `main` | F12, F13 | liten |
-| 7 | Hygien, Docker och CI | F14, F16–F20 | liten–medel |
+| Steg | Mål | Fynd | Storlek | Status |
+|---|---|---|---|---|
+| 1 | Persistera femminutersregeln och timbudgeten | F1 | liten | **Kvar** |
+| 2 | Källneutral modell, mättid som `time.Time` | F2, F4 | medel | Gjort |
+| 3 | Schemaläggare per källa | F3 | medel | Gjort |
+| 4 | Dela upp `match.go`, typad poäng, `Kind`-konstant | F5–F8 | medel | Gjort |
+| 5 | Frontend: ren logik, temperaturtabell, delade konstanter | F9–F11, F15 | medel | **Kvar** |
+| 6 | Server och `main` | F12, F13 | liten | Gjort |
+| 7 | Hygien, Docker och CI | F14, F16–F20 | liten–medel | Gjort; resten av CI/CD i [plan-cicd](plan-cicd-2026-11-17.md) |
 
 Ordningen är vald så att steg 1 minskar en verklig risk mot API-villkoren, steg 2–3 görs innan en
 andra källa skrivs, steg 4 är rent internt och täcks av befintliga tester, och steg 5 görs
@@ -25,7 +28,7 @@ tillsammans med eller före Svelte-flytten.
 
 ---
 
-## Steg 1 – Persistera femminutersregeln och timbudgeten (F1)
+## Steg 1 – Persistera femminutersregeln och timbudgeten (F1) – kvar
 
 **Varför först:** Kravet "även efter omstarter" i CLAUDE.md uppfylls inte i dag.
 
@@ -46,56 +49,62 @@ tillsammans med eller före Svelte-flytten.
 hämtningen (säkrast) eller hämta direkt (snabbast start)? Rekommendation: hämta direkt bara om filen
 helt saknas (förstagångsstart), annars vänta.
 
-## Steg 2 – Källneutral modell och riktig mättid (F2, F4)
+**Status:** Inte gjort. `Feed` och `Budget` (steg 3) är nu varsitt ställe att spara tillstånd från.
+Samma brist finns som F11 i [sakerhetsgranskning-2026-10-28.md](sakerhetsgranskning-2026-10-28.md) och
+punkt 1 i [granskning-mot-claude-md-2026-10-28.md](granskning-mot-claude-md-2026-10-28.md). Enligt
+beslutet i [plan-cicd-2026-11-17.md](plan-cicd-2026-11-17.md) gäller kravet krascher, inte omstarter vid
+driftsättning.
 
-**Filer som påverkas**
-
-| Fil | Ändring |
-|---|---|
-| nytt: `internal/obs/obs.go` (eller liknande) | `Station`/`Observation` med `Source`, `ID`, `Title`, `Temp *float64`, `Lat`, `Lon`, `Kommun`, `Lan`, `MeasuredAt time.Time`, `URL`. Gemensamt fel `ErrBudgetExhausted`. Gränssnitt `Source` flyttas hit. |
-| `internal/tnu/client.go` | Mappa `apiResponse` → `obs.Station`; parsa `lastUpdate` med `Europe/Stockholm`; ta bort `Station` och `Source` härifrån; returnera `obs.ErrBudgetExhausted` (behåll `tnu.ErrBlocked` internt). |
-| `internal/tnu/mock.go` | Följer med mappningen. |
-| `internal/places/index.go`, `match.go` | Byt `tnu.Station` mot `obs.Station`; `places` slutar importera `tnu`. |
-| `internal/server/server.go` | Importera `obs` i stället för `tnu` för felet. JSON-fältet `lastUpdate` blir ISO-UTC (`measuredAt`). |
-| `web/app.js` | `formatUpdated` tar ISO-tid i stället för strängjämförelse; byt fältnamn. |
-| Tester i `internal/tnu`, `internal/places`, `internal/server` | Anpassas till de nya typerna; nytt test för sommar-/vintertid i tidsparsningen. |
-
-**Notera:** detta är en ändring av API-svaret (`lastUpdate` → `measuredAt`). Frontend och backend
-måste ändras i samma PR.
-
-## Steg 3 – Per-källa-schemaläggare (F3)
-
-**Filer som påverkas**
+## Steg 2 – Källneutral modell och riktig mättid (F2, F4) – gjort
 
 | Fil | Ändring |
 |---|---|
-| nytt: `internal/sched/` (eller `internal/source/`) | Generisk schemaläggare per källa: intervall, minsta mellanrum, timbudget, felräknare/stale, persistens (från steg 1), panikskydd, egen cache med senast kända data och ålder. |
-| `internal/places/index.go` | Tappar ansvaret för tid, fel och räknare; lyssnar på schemaläggarens resultat och bygger snapshot. Tar emot en eller flera källor. |
-| `internal/tnu/client.go` | Behåller bara anrop, signering och tolkning; budgeten flyttas till schemaläggaren. |
-| `internal/places/index_test.go` | De befintliga testerna (falsk klocka m.m.) flyttas till schemaläggarens tester; `Index` får färre. |
-| `CLAUDE.md` | Uppdatera avsnittet "Flera källor": gränssnitt och var reglerna bor. |
+| `internal/obs/obs.go` (ny) | `obs.Station` med `Source`, `MeasuredAt` (`time.Time`, UTC) och `URL`; gränssnittet `obs.Source`; felet `obs.ErrBudgetExhausted`. |
+| `internal/tnu/client.go` | Översätter svaren till `obs.Station`. `lastUpdate` tolkas som svensk tid (`Europe/Stockholm`, `time/tzdata` inbäddad eftersom distroless saknar zoneinfo) och blir UTC. `tnu.Station`, `tnu.Source` och `tnu.ErrBudgetExhausted` är borttagna. Ny `DecodeStations`. Kommentar om att MD5 i `sign` är föreskrivet. |
+| `internal/places/*`, `internal/server/*` | Använder `obs` i stället för `tnu`; `places` och `server` importerar inte längre `tnu`. |
+| `web/app.js` | `lastUpdate` → `measuredAt`; `formatUpdated` visar ISO-tid i svensk tid. |
+| `internal/tnu/client_test.go` | Nytt test för sommar-/vintertid och ogiltig tid. |
 
-**Risk:** `index_test.go` innehåller i dag de viktigaste garantierna (inga omförsök inom intervallet,
-panik blir fel, delad första hämtning). De ska flyttas, inte skrivas om, så att inga garantier
-tappas.
+**API-ändring:** fältet `lastUpdate` heter nu `measuredAt` (ISO, UTC) och varje mätpunkt har `source`.
 
-## Steg 4 – Dela upp `match.go` (F5–F8)
-
-Rent internt; publika API:t för `places` ändras inte, utom `Kind`.
+## Steg 3 – Schemaläggare per källa (F3) – gjort
 
 | Fil | Ändring |
 |---|---|
-| `internal/places/match.go` | Delas i `snapshot.go` (`newSnapshot` uppdelad i gruppera / slå ihop / bestäm detalj / sortera), `fold.go` (`fold`, alias, `splitTitle`, `kommunNames`), `rank.go` (`Search`, `resolve`, `Suggest`, `rank`) och `matcher.go` (`matcher`, `score`, `prefixDistance`). |
-| samma | Poängen blir en struct (`kind`, `typos`, `viaOrt`) med `less`; `fuzzy` härleds på ett ställe. |
-| samma | `type Kind string` med konstanterna `KindKommun`, `KindOrt`, `KindPlats`; `kindOrder` blir en metod. |
-| `internal/places/data.go` (ny, eller en JSON-fil via `go:embed`) | `aliases` och `irregularKommuner`. |
-| `internal/places/match_test.go` | Delas på samma sätt (`snapshot_test.go`, `matcher_test.go`). Ett test per alias/oregelbunden kommun. |
-| `internal/places/bench_test.go` | Oförändrad; körs före och efter. |
+| `internal/feed/feed.go` (ny) | Generisk `Feed[T]`: intervall, aldrig tidigare omförsök än ett intervall (även efter fel), delad första hämtning, senast lyckade värdet kvar vid fel, inaktuell efter fler än 3 misslyckanden i rad, panikskydd, `Loaded()`. |
+| `internal/feed/feed_test.go` (ny) | De tio garantitesterna från `index_test.go`, flyttade, plus ett test att två källor är oberoende. |
+| `internal/budget/` (ny) | `Budget` räknar anrop per tidsfönster, med tester. Placerad separat, inte i feed, eftersom budgeten hör till en källas villkor. |
+| `internal/tnu/client.go` | Använder `budget.Budget` (bara osignerat). |
+| `internal/places/index.go` | `Index` är en tunn omslagsklass kring `Feed[*Snapshot]`; ny metod `Ready()`. |
+| `internal/places/index_test.go` | Skrivet om till två små tester; schemaläggningen testas i `feed`. |
 
-**Krav:** `go test -run xxx -bench Suggest ./internal/places/` ska ligga kvar kring 0,2–0,4 ms och
-samma antal allokeringar.
+Sammanslagning av flera källor ingår inte; den byggs när en andra källa läggs till.
 
-## Steg 5 – Frontend (F9–F11, F15)
+## Steg 4 – Uppdelning av `match.go` (F5–F8) – gjort
+
+| Fil | Innehåll |
+|---|---|
+| `snapshot.go` | `Kind` (typad: `KindKommun/KindOrt/KindPlats`), `Snapshot`, `Place`; `newSnapshot` uppdelad i `groupStations`, `mergeSameNamedPlatser`, `kommunPlaces`, `ortPlaces`, `platsPlaces`, `finalize`. |
+| `fold.go` | `fold`, `withAliases`, `kommunNames`, `splitTitle`, `ortName`. |
+| `data.go` | `aliases` och `irregularKommuner`. |
+| `rank.go` | `Search`, `resolve`, `Suggest`, `rank`. |
+| `matcher.go` | `matchScore` (struct med klass, skrivfel och `viaOrt`, en `cmp`, `fuzzy()`), `matcher`. |
+| `distance.go` | `prefixDistance` (oförändrad algoritm). |
+
+Tester: `match_test.go` delad i `rank_test.go`, `fold_test.go`, `matcher_test.go` och nya handgjorda
+fixturer i `snapshot_test.go`; ett datadrivet test per post i `data.go`.
+
+**Prestanda (`go test -bench Suggest`)**
+
+| | Före | Efter |
+|---|---|---|
+| Typiskt | 0,17 ms, 1 632 B | 0,17 ms, 1 384 B |
+| Värsta fallet | 0,30–0,31 ms, 1 688 B | 0,30–0,38 ms, 1 688 B |
+
+Spridningen i värsta fallet beror på kodplacering i minnet (samma algoritm; att flytta funktioner i den
+gamla koden gav 0,30–0,35 ms). Inom målet 0,2–0,4 ms men nära taket.
+
+## Steg 5 – Frontend (F9–F11, F15) – kvar
 
 Görs före eller tillsammans med Svelte-flytten.
 
@@ -115,31 +124,50 @@ Görs före eller tillsammans med Svelte-flytten.
 **CSP:** kontrollera `transition:`/`animate:` och alla Svelte-funktioner som lägger in stilmallar
 vid körning mot `style-src 'self'`.
 
-## Steg 6 – Server och `main` (F12, F13)
+## Steg 6 – Server och `main` (F12, F13) – gjort
 
 | Fil | Ändring |
 |---|---|
-| `internal/server/server.go` | Delas i `handlers.go`, `static.go`, `headers.go`. En hjälpfunktion för mönstret query → snapshot → cache-rubrik → JSON. Namngivna konstanter för `Cache-Control`. Felmeddelandet byggs av `minQueryLen`/`maxQueryLen`. |
-| samma | `/healthz` rapporterar om listan någonsin hämtats och om den är inaktuell (utan att läcka detaljer). `writeJSON` loggar kodningsfel. |
-| nytt: `internal/config/config.go` | `Load()` läser och validerar env (`REFRESH_INTERVAL`, `TNU_*`, `ADDR`, `STATE_DIR`); returnerar en struct. |
-| `main.go` | `run` blir kort: `config.Load`, `buildSources(cfg)`, uppstart, nedstängning. |
-| `internal/server/server_test.go`, nytt `internal/config/config_test.go` | Tester för `/healthz`-tillstånden och för env-tolkningen (för kort intervall, ogiltigt värde, saknad `TNU_CLI`). |
+| `internal/server/server.go` | Bara typer, konstanter, `New`, `Handler`. Namngivna `Cache-Control`-konstanter. |
+| `internal/server/handlers.go` (ny) | Hanterare, hjälpfunktionen `respond` (delar mönstret query → lista → cache-rubrik → JSON), `writeJSON` som loggar fel, felmeddelandet byggs av `minQueryLen`/`maxQueryLen`. |
+| `internal/server/static.go`, `headers.go` (nya) | Statiska filer respektive CSP och säkerhetsrubriker (oförändrat innehåll). |
+| `/healthz` | Alltid 200, men texten är `ok`, `ok: väntar på första hämtningen` eller `ok: listan kan vara inaktuell`; `Cache-Control: no-store`. |
+| `internal/config/` (ny) | `config.Load(getenv)` med validering och tester (`REFRESH_INTERVAL` höjs till minst 5 min, `TNU_CLI` krävs utan mock). |
+| `main.go` | Kort `run`, `newSource(cfg, log)`, underkommandot `temperatur healthcheck`. |
+| `healthcheck.go` | Anropar `/healthz` på den egna servern (för Docker `HEALTHCHECK`), med test. |
+| `internal/server/server_test.go` | Nya tester: `/healthz` i tre tillstånd, `Cache-Control`, `source`/`measuredAt`, felmeddelandet. |
 
-## Steg 7 – Hygien, Docker och CI (F14, F16–F20)
+## Steg 7 – Hygien, Docker och CI (F14, F16–F20) – gjort
 
 | Fil | Ändring |
 |---|---|
-| `internal/tnu/mock.go` | Bakom byggtagg (`//go:build mock`) eller flyttat till ett testpaket; `TNU_MOCK` ska inte fungera i produktionsbygget. |
-| `internal/places/match_test.go` (efter steg 4) | Små handgjorda fixturer för reglerna; behåll några tester mot verklig mock-data. |
-| `CLAUDE.md` | Konvention för språk i identifierare. |
-| `internal/tnu/client.go` | Kommentar vid `sign` om att MD5 föreskrivs av API:et. |
-| `Dockerfile` | Kopiera `go.mod`/`go.sum` först och kör `go mod download` (cache), `HEALTHCHECK`, pinna basimagerna med digest. |
-| `docker-compose.yml` | Ta bort `ports: 127.0.0.1:8080` (eller dokumentera undantaget i CLAUDE.md). |
-| nytt: `.golangci.yml` | `staticcheck`, `errcheck`, `gosec`, `govet`. |
-| nytt: `.github/workflows/ci.yml` | Enligt CLAUDE.md: `go vet`, `go test -race`, benchmarken, `govulncheck`, frontendbygge, `svelte-check`, lint, `npm audit`, kontrasttestet, Docker-bygge med Trivy. `permissions` minimala, actions låsta till commit-SHA. |
-| nytt: `.github/workflows/deploy.yml` | Vid merge till `main`: bygg, tagga med SHA, publicera på GHCR, driftsätt, kontrollera `/healthz`, rulla tillbaka vid fel. |
+| `internal/tnumock/` (ny; flyttad från `internal/tnu/mock.go` och `mockdata/`) | Sparade svar. Importeras bara av `mock_on.go` (`//go:build mock`); `mock_off.go` ger fel om `TNU_MOCK=1` utan taggen. Kontrollerat: produktionsbinären innehåller inget av mock-paketet. |
+| `Dockerfile` | `go.mod` kopieras och moduler laddas ned före källkoden (cache); `HEALTHCHECK` via `/temperatur healthcheck`. Basimagerna är inte pinnade med digest (kunde inte hämtas utan Docker). |
+| `.golangci.yml` (ny) | errcheck, govet, ineffassign, staticcheck, unused, gosec, bodyclose, gofmt. Två `//nolint:gosec` med motivering (MD5 i `sign`, lokal healthcheck-URL). |
+| `.github/workflows/ci.yml` (ny) | Jobb: Go (gofmt, vet, `test -race`, benchmark, govulncheck), lint, Docker-bygge + Trivy. `permissions: {}` överst, `contents: read` per jobb, `pull_request` (inte `pull_request_target`), inga hemligheter. |
+| `.github/workflows/publish.yml` (ny) | Efter merge till `main`: bygg, Trivy, publicera på GHCR taggad med commit-SHA. Bara `GITHUB_TOKEN` med `packages: write`. |
+| `.github/dependabot.yml` (ny) | Veckovisa uppdateringar för Go-moduler, Actions och Docker. |
+| Actions | Låsta till commit-SHA (version i kommentar); alla utgåvor äldre än två veckor. |
+| `README.md`, `DEPLOY.md`, `CLAUDE.md`, `.vscode/launch.json` | `go run -tags mock .`, `buildFlags` för mock, nya `/healthz`-texter, avsnitt om CI/CD, uppdaterad arkitektur och namnkonvention (svenska domänbegrepp, engelska tekniska namn). |
 
----
+Det som återstod av steget – låsa basimagerna med digest, ta bort den publicerade porten och
+automatisk driftsättning (tidigare tänkt som `deploy.yml`) – finns nu i
+[plan-cicd-2026-11-17.md](plan-cicd-2026-11-17.md).
+
+## Verifiering av de genomförda stegen (2026-10-28)
+
+- `go vet ./...` och `go vet -tags mock ./...`: rent.
+- `go test ./...`: alla paket gröna.
+- `staticcheck`: inga fynd. `govulncheck` (v1.9.0): inga sårbarheter.
+- Rökprov av servern i mock-läge: `/healthz`, `/api/search`, `/api/suggest`, 400-svar, rubriker och
+  `temperatur healthcheck` (exit 0 vid frisk server, 1 vid fel).
+- `git ls-files`: ingen `.env` eller `__debug_bin*` incheckad. `cli`/`sign` loggas inte.
+
+**Inte verifierat då:**
+
+- `go test -race`: kräver C-kompilator och kunde inte köras lokalt; körs i CI.
+- Docker-bygget, `golangci-lint` och workflow-filerna är inte körda. Första CI-körningen kan ge
+  småanmärkningar.
 
 ## Kontroller efter varje steg
 
@@ -156,6 +184,7 @@ Enligt CLAUDE.md ska varje större ändring granskas och rapporteras:
 ## Öppna frågor
 
 1. Steg 1: ska servern vänta fem minuter efter omstart om tillståndsfilen är trasig?
-2. Steg 2: ska `lastUpdate` byta namn i API:et direkt, eller ska båda fälten finnas en tid?
-3. Steg 5: ska Svelte-flytten göras före steg 4, eller ska frontendlogiken lyftas ut i vanlig JS först?
-4. Steg 7: ska `docker-compose.yml` sluta publicera `127.0.0.1:8080`, eller ska CLAUDE.md ändras?
+2. Steg 5: ska Svelte-flytten göras före eller efter att frontendlogiken lyfts ut i vanlig JS?
+
+Avgjorda: fältet `lastUpdate` bytte namn direkt till `measuredAt` (steg 2). Frågan om porten
+`127.0.0.1:8080` avgörs i [plan-cicd-2026-11-17.md](plan-cicd-2026-11-17.md) (steg 3: ingen publicerad port).

@@ -167,7 +167,7 @@ git checkout main                 # när felet är rättat och du vill tillbaka
 - **`.github/workflows/ci.yml`** körs för varje PR och push till `main`: formatering, `go vet`, `go test -race` (inklusive kontrasttestet), benchmarken för `Suggest`, `govulncheck`, `golangci-lint` samt Docker-bygge med Trivy-skanning.
 - **`.github/workflows/publish.yml`** körs efter merge till `main`: bygger imagen, skannar den och publicerar den på GHCR som `ghcr.io/<ägare>/<repo>:<commit-SHA>`.
 - Actions är låsta till commit-SHA (Dependabot föreslår uppdateringar) och workflows har minsta möjliga `permissions`. Inga hemligheter används av CI; `publish` använder bara det inbyggda `GITHUB_TOKEN`.
-- **Driftsättningen på servern är inte automatiserad än.** Servern har inga öppna portar, så den måste hämta nya imagar själv: antingen en self-hosted runner som bara kör jobb från `main`, eller en tjänst på servern som hämtar nya taggar. Efter driftsättningen ska `/healthz` kontrolleras och föregående image återställas om den inte svarar. Tills dess gäller steg 8 ovan.
+- **Driftsättningen på servern är inte automatiserad än.** Tills den är det gäller steg 8 ovan. Planen finns i [docs/plan-cicd-2026-11-17.md](docs/plan-cicd-2026-11-17.md).
 
 ## Innan adressen sprids
 

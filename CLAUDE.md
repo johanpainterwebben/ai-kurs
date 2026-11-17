@@ -71,14 +71,14 @@ Listan över mätpunkter ska vara så lätt som möjligt, och mer data hämtas f
 
 ### CI/CD
 
-Verktyget är **GitHub Actions**. `.github/workflows/ci.yml` (Go-kontroller, `golangci-lint`, Docker-bygge med Trivy) och `publish.yml` (bygger och publicerar imagen på GHCR) finns redan. Det som återstår är frontend-stegen (väntar på Svelte) och automatisk driftsättning med återställning; se DEPLOY.md. Målbilden:
+Verktyget är **GitHub Actions**. `.github/workflows/ci.yml` (Go-kontroller, `golangci-lint`, Docker-bygge med Trivy) och `publish.yml` (bygger och publicerar imagen på GHCR) finns redan. Det som återstår, och besluten om hur, står i `docs/plan-cicd-2026-11-17.md`. Målbilden:
 
 - **Vid varje PR och push:**
   - Go: `go vet ./...`, `go test -race ./...`, benchmarken för `Suggest`, `govulncheck` och `golangci-lint` (`.golangci.yml`; ett rött lint-steg blockerar).
   - Frontend: bygge, `svelte-check`, lint och `npm audit`.
   - Kontrasttestet.
   - Docker-bygge med sårbarhetsskanning av imagen (t.ex. Trivy).
-- **Vid merge till `main`:** imagen byggs, taggas med commit-SHA och publiceras på GHCR. Därefter driftsätts den på servern. Eftersom servern inte har några öppna portar ska driftsättningen hämtas därifrån: antingen en self-hosted runner som bara kör jobb från `main` (aldrig kod från PR:er eller forkar), eller en tjänst på servern som hämtar nya imagar. Efter driftsättningen kontrolleras `/healthz`, och om den inte svarar rullas den tillbaka till föregående image.
+- **Vid merge till `main`:** imagen byggs, taggas med commit-SHA och publiceras på GHCR. Därefter hämtar servern den nya imagen själv (den har inga öppna portar), kontrollerar `/healthz` och rullar tillbaka till föregående image om den inte svarar. Hur det går till står i planen ovan.
 - Workflows ska ha minsta möjliga `permissions`, actions ska vara låsta till commit-SHA och hemligheter ska ligga i GitHub Secrets/Environments.
 
 ## Principer
