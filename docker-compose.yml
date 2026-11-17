@@ -1,0 +1,23 @@
+services:
+  temperatur:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Bara lokalt, för felsökning med curl. Utåt går trafiken via den omvända
+      # proxyn och tunneln i serverrepot, som når appen på det delade nätverket.
+      - "127.0.0.1:8080:8080"
+    networks: [proxy]
+    # Servern skriver inget till disk och behöver inga extra rättigheter.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  proxy:
+    # Skapas av serverrepot; starta det först.
+    external: true

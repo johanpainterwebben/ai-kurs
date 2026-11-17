@@ -1,0 +1,6 @@
+.env
+/temperatur
+__debug_bin*
+
+# Lokala anteckningar med uppgifter om den riktiga driftmiljön (flyttas till serverrepot)
+*.local.md

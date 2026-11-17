@@ -1,0 +1,6 @@
+.env
+.git
+.vscode
+/temperatur
+__debug_bin*
+*.local.md
