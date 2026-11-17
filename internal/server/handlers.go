@@ -54,11 +54,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	switch {
 	case !s.index.Ready():
-		w.Write([]byte("ok: väntar på första hämtningen"))
+		s.writeText(w, "ok: väntar på första hämtningen")
 	case s.index.Stale():
-		w.Write([]byte("ok: listan kan vara inaktuell"))
+		s.writeText(w, "ok: listan kan vara inaktuell")
 	default:
-		w.Write([]byte("ok"))
+		s.writeText(w, "ok")
 	}
 }
 
@@ -106,7 +106,15 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	if _, err := w.Write(append(b, '\n')); err != nil {
+	s.write(w, append(b, '\n'))
+}
+
+func (s *Server) writeText(w http.ResponseWriter, text string) {
+	s.write(w, []byte(text))
+}
+
+func (s *Server) write(w http.ResponseWriter, b []byte) {
+	if _, err := w.Write(b); err != nil {
 		s.log.Debug("kunde inte skriva svaret", "err", err) // oftast att besökaren gått
 	}
 }

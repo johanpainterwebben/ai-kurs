@@ -2,6 +2,7 @@ package places
 
 import (
 	"cmp"
+	"math"
 	"strings"
 )
 
@@ -136,7 +137,7 @@ func (m *matcher) scoreKey(k matchKey) (matchScore, bool) {
 			break // bättre än ett fel går inte, utan exakt träff ovan
 		}
 	}
-	if best > m.typos {
+	if best > m.typos || best < 0 || best > math.MaxUint8 {
 		return matchScore{}, false
 	}
 	return matchScore{class: classTypo, typos: uint8(best)}, true

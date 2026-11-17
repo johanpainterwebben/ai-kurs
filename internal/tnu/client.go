@@ -25,6 +25,7 @@ import (
 	_ "time/tzdata" // tidszonen Europe/Stockholm; distroless-avbildningen saknar zoneinfo
 
 	"temperatur/internal/budget"
+	"temperatur/internal/httpbody"
 	"temperatur/internal/obs"
 )
 
@@ -98,7 +99,7 @@ func (c *Client) get(ctx context.Context, params string, out *apiResponse) error
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
+		httpbody.Drain(res.Body, 64<<10)
 		return fmt.Errorf("tnu: oväntad status %s", res.Status)
 	}
 	if err := json.NewDecoder(io.LimitReader(res.Body, 16<<20)).Decode(out); err != nil {

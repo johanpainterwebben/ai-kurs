@@ -2,10 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"time"
+
+	"temperatur/internal/httpbody"
 )
 
 // healthcheck anropar /healthz på servern som lyssnar på addr. Imagen saknar
@@ -25,7 +26,7 @@ func healthcheck(addr string) error {
 		return err
 	}
 	defer res.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(res.Body, 1<<10))
+	httpbody.Drain(res.Body, 1<<10)
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("/healthz svarade %s", res.Status)
 	}
