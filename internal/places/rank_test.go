@@ -57,7 +57,7 @@ func TestSearchResolvesToOnePlace(t *testing.T) {
 		{"Göteborg", "Göteborgs kommun", KindKommun, 23},
 	}
 	for _, tt := range tests {
-		res := s.Search(tt.query, 100)
+		res := s.Search(tt.query, 100, sameAsTemp)
 		if res.Place == nil {
 			t.Errorf("Search(%q): ingen plats", tt.query)
 			continue
@@ -71,12 +71,12 @@ func TestSearchResolvesToOnePlace(t *testing.T) {
 
 func TestSearchOnlyReturnsStationsInPlace(t *testing.T) {
 	s := realSnapshot(t)
-	for _, st := range s.Search("Lund", 100).Stations {
+	for _, st := range s.Search("Lund", 100, sameAsTemp).Stations {
 		if st.Kommun != "Lunds kommun" {
 			t.Errorf("Lund gav %s i %s", st.Title, st.Kommun)
 		}
 	}
-	for _, st := range s.Search("Bälinge", 100).Stations {
+	for _, st := range s.Search("Bälinge", 100, sameAsTemp).Stations {
 		if ortName(st.Title) != "Bälinge" {
 			t.Errorf("Bälinge gav %s", st.Title)
 		}
@@ -86,7 +86,7 @@ func TestSearchOnlyReturnsStationsInPlace(t *testing.T) {
 func TestSearchSortsWarmestFirstAndMissingLast(t *testing.T) {
 	s := realSnapshot(t)
 	for _, q := range []string{"Lund", "Sthlm", "Kiruna", "Göteborg"} {
-		res := s.Search(q, 100)
+		res := s.Search(q, 100, sameAsTemp)
 		seenMissing := false
 		for i, st := range res.Stations {
 			if st.Temp == nil {
@@ -102,7 +102,7 @@ func TestSearchSortsWarmestFirstAndMissingLast(t *testing.T) {
 		}
 	}
 	// Lund har en mätpunkt utan värde (Dörröd); den ska stå sist.
-	lund := s.Search("Lund", 100).Stations
+	lund := s.Search("Lund", 100, sameAsTemp).Stations
 	if last := lund[len(lund)-1]; last.Temp != nil {
 		t.Errorf("sista mätpunkten i Lund ska sakna värde, fick %s", last.Title)
 	}
@@ -110,8 +110,8 @@ func TestSearchSortsWarmestFirstAndMissingLast(t *testing.T) {
 
 func TestSearchLimitKeepsWarmest(t *testing.T) {
 	s := realSnapshot(t)
-	all := s.Search("Sthlm", 100).Stations
-	top := s.Search("Sthlm", 5).Stations
+	all := s.Search("Sthlm", 100, sameAsTemp).Stations
+	top := s.Search("Sthlm", 5, sameAsTemp).Stations
 	for i := range top {
 		if top[i].ID != all[i].ID {
 			t.Fatalf("med begränsning ska de 5 varmaste visas; plats %d är %s, vill ha %s", i, top[i].Title, all[i].Title)
@@ -133,7 +133,7 @@ func TestSubLocations(t *testing.T) {
 		{"hertsön", "Hertsön", "Luleå/Hertsön", 2}, // "Luleå/Hertsön" och "Luleå/Hertsön 2"
 	}
 	for _, tt := range tests {
-		res := s.Search(tt.query, 100)
+		res := s.Search(tt.query, 100, sameAsTemp)
 		if res.Place == nil {
 			t.Errorf("Search(%q): ingen plats", tt.query)
 			continue
@@ -143,14 +143,14 @@ func TestSubLocations(t *testing.T) {
 		}
 	}
 	// Det större stället vinner fortfarande vid samma namn.
-	if res := s.Search("Lund", 100); res.Place.Label != "Lunds kommun" {
+	if res := s.Search("Lund", 100, sameAsTemp); res.Place.Label != "Lunds kommun" {
 		t.Errorf("Lund ska fortfarande ge kommunen, fick %s", res.Place.Label)
 	}
 }
 
 func TestAmbiguousSubLocationIsNotGuessed(t *testing.T) {
 	s := realSnapshot(t)
-	if res := s.Search("centrum", 100); res.Place != nil {
+	if res := s.Search("centrum", 100, sameAsTemp); res.Place != nil {
 		t.Errorf("centrum finns i många orter och ska inte gissas, fick %s", res.Place.Query)
 	}
 	got := s.Suggest("centrum", 8)
@@ -195,7 +195,7 @@ func TestSameNamedSubLocationMergedIntoOrt(t *testing.T) {
 func TestSearchTyposAreNotGuessed(t *testing.T) {
 	s := realSnapshot(t)
 	for _, q := range []string{"upsala", "finnsintealls"} {
-		if res := s.Search(q, 100); res.Place != nil || res.Total != 0 || res.Stations == nil {
+		if res := s.Search(q, 100, sameAsTemp); res.Place != nil || res.Total != 0 || res.Stations == nil {
 			t.Errorf("Search(%q) ska inte gissa: %+v", q, res.Place)
 		}
 	}
@@ -203,7 +203,7 @@ func TestSearchTyposAreNotGuessed(t *testing.T) {
 
 func TestSearchLimitAndAverage(t *testing.T) {
 	s := realSnapshot(t)
-	res := s.Search("Sthlm", 5)
+	res := s.Search("Sthlm", 5, sameAsTemp)
 	if res.Total != 69 || len(res.Stations) != 5 {
 		t.Fatalf("Total=%d, len=%d; vill ha 69 och 5", res.Total, len(res.Stations))
 	}

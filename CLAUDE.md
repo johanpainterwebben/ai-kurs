@@ -4,7 +4,7 @@
 
 Ta reda på vilken temperatur det är där man är eller dit man ska, så att man vet vad man ska ha på sig. Sidan visar temperaturen och en gubbe som är klädd efter den.
 
-I dag finns en enda temperaturkälla (temperatur.nu). Målet är att använda flera källor där det går och slå ihop dem till ett samlat resultat för platsen.
+I dag finns en enda temperaturkälla (temperatur.nu). Vinden från SMHI används för att räkna ut hur kallt det känns ("Känns som"), men ger inga egna mätpunkter. Målet är att använda flera källor där det går och slå ihop dem till ett samlat resultat för platsen.
 
 Se README.md för hur man kör projektet och vilka API-villkor som följs, och DEPLOY.md för hur servern sätts upp.
 
@@ -19,11 +19,12 @@ Besökare → tunnel-/CDN-leverantör → tunnel → omvänd proxy (egen contain
 - `main.go` väljer källa (`newSource`), startar bakgrundsuppdateringen och HTTP-servern och stänger ned snyggt. `temperatur healthcheck` anropar `/healthz` och används av Docker `HEALTHCHECK` (imagen saknar curl).
 - `internal/config/` läser och kontrollerar miljövariablerna (`config.Load`).
 - `internal/obs/` är den källneutrala modellen: `obs.Station` (med `Source`, `MeasuredAt` som `time.Time` i UTC och källans `URL`), gränssnittet `obs.Source` och felet `obs.ErrBudgetExhausted`. Resten av programmet känner bara till `obs`, aldrig till en enskild källas typer.
+- `internal/smhi/` hämtar senaste timmens vind för alla SMHI:s stationer i ett anrop, i en egen `feed.Feed` var 30:e minut. `internal/wind/` räknar ut "Känns som" med SMHI:s formel för vindkyla. Vilken vindstation som hör till varje mätpunkt står i `internal/wind/mapping.json`, som skapas en gång med `go run ./cmd/windmap` och checkas in. `places.Search` lägger till `feelsLike` per mätpunkt och `averageFeelsLike` för platsen; utan vind är de samma som temperaturen.
 - `internal/tnu/` är klienten mot temperatur.nu. Den sköter signering och översätter svaren till `obs.Station`. `internal/budget/` räknar anrop per tidsfönster (osignerade anrop: högst 25/timme).
 - `internal/feed/` hämtar data från en källa i bakgrunden (`feed.Feed[T]`): intervall, aldrig tidigare omförsök än ett intervall (femminutersregeln, även efter fel), en delad första hämtning, senast lyckade värdet kvar vid fel, inaktuell-flagga efter flera misslyckanden i rad och panikskydd. Varje källa får en egen `Feed`.
 - `internal/places/` bygger sökindexet av mätpunkterna (`snapshot.go`), normaliserar namn (`fold.go`, `data.go`), rankar (`rank.go`) och matchar feltolerant (`matcher.go`, `distance.go`). `index.go` kopplar sökindexet till en `feed.Feed`. Besökare läser alltid från cachen och väntar aldrig på en extern källa. Sök, förslag och felstavning körs lokalt mot cachen och kostar inga API-anrop.
 - `internal/server/` innehåller endpoints (`handlers.go`: `/api/search`, `/api/suggest`, `/healthz`), statiska filer (`static.go`) och säkerhetsrubriker med CSP (`headers.go`).
-- `internal/tnumock/` har sparade svar från temperatur.nu för utveckling och tester. Den importeras bara av `mock_on.go` (byggtagg `mock`), så `TNU_MOCK=1` fungerar bara med `go run -tags mock .` och finns inte i produktionsbinären.
+- `internal/tnumock/` har sparade svar från temperatur.nu för utveckling och tester. Den importeras bara av `mock_on.go` (byggtagg `mock`) och verktyget `cmd/windmap`, så `TNU_MOCK=1` fungerar bara med `go run -tags mock .` och finns inte i produktionsbinären.
 - Frontendfilerna bäddas in i binären med `go:embed`, så det finns bara en binär att driftsätta.
 
 ### Namn i koden

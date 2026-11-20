@@ -1,0 +1,120 @@
+{
+ "updated": 1795194000000,
+ "parameter": {
+  "key": "4",
+  "name": "Vindhastighet",
+  "summary": "medelvärde 10 min, 1 gång/tim",
+  "unit": "meter per sekund"
+ },
+ "period": {
+  "key": "latest-hour",
+  "from": 1795190401000,
+  "to": 1795194000000,
+  "summary": "Data från senaste timmen",
+  "sampling": "10 minuter"
+ },
+ "link": [
+  {
+   "href": "https://opendata-download-metobs.smhi.se/api/version/1.0/parameter/4/station-set/all/period/latest-hour/data.json",
+   "rel": "data",
+   "type": "application/json"
+  },
+  {
+   "href": "https://opendata-download-metobs.smhi.se/api/version/1.0/parameter/4/station-set/all/period/latest-hour/data.xml",
+   "rel": "data",
+   "type": "application/xml"
+  },
+  {
+   "href": "https://opendata-download-metobs.smhi.se/api/version/1.0/parameter/4/station-set/all/period/latest-hour/data.csv",
+   "rel": "data",
+   "type": "text/plain"
+  },
+  {
+   "href": "https://opendata-download-metobs.smhi.se/api/version/1.0/parameter/4/station-set/all/period/latest-hour.atom",
+   "rel": "period",
+   "type": "application/atom+xml"
+  },
+  {
+   "href": "https://opendata-catalog.smhi.se/md/25080190-38ba-4279-a65d-d9ef8d0bf949",
+   "rel": "iso19139",
+   "type": "application/vnd.iso.19139+xml"
+  },
+  {
+   "href": "https://opendata-catalog.smhi.se/md/bbcb137b-b8fc-450c-b67d-6c3239dbe0de",
+   "rel": "iso19139",
+   "type": "application/vnd.iso.19139+xml"
+  }
+ ],
+ "station": [
+  {
+   "key": "97510",
+   "name": "Uppsala Aut",
+   "owner": "Uppsala universitet",
+   "ownerCategory": "CLIMATE",
+   "measuringStations": "CORE",
+   "from": 883612800000,
+   "to": 1795195219000,
+   "height": 23.535,
+   "latitude": 59.8471,
+   "longitude": 17.632,
+   "value": [
+    {
+     "date": 1795194000000,
+     "value": "1.5",
+     "quality": "G"
+    }
+   ]
+  },
+  {
+   "key": "140480",
+   "name": "Umeå Flygplats",
+   "owner": "Swedavia",
+   "ownerCategory": "CLIMATE",
+   "measuringStations": "CORE",
+   "from": 362793600000,
+   "to": 1795195219000,
+   "height": 7.31,
+   "latitude": 63.7931,
+   "longitude": 20.28,
+   "value": [
+    {
+     "date": 1795194000000,
+     "value": "3.0",
+     "quality": "G"
+    }
+   ]
+  },
+  {
+   "key": "9013",
+   "name": "Alskog",
+   "owner": "SMHI",
+   "ownerCategory": "NATIONAL",
+   "measuringStations": "ADDITIONAL",
+   "from": 1751328000000,
+   "to": 1795195220000,
+   "height": 0.0,
+   "latitude": 57.3271,
+   "longitude": 18.6162,
+   "value": [
+    {
+     "date": 1795194000000,
+     "value": "0.7",
+     "quality": "Y"
+    }
+   ]
+  },
+  {
+   "key": "161940",
+   "name": "Boden",
+   "owner": "Försvarsmakten",
+   "ownerCategory": "CLIMATE",
+   "measuringStations": "CORE",
+   "from": 1267401600000,
+   "to": 1795195219000,
+   "height": 25.2,
+   "latitude": 65.814,
+   "longitude": 21.635,
+   "value": []
+  }
+ ]
+}

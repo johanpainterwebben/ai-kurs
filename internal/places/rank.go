@@ -10,44 +10,74 @@ import (
 
 // SearchResult är mätpunkterna på den plats en sökning ledde till.
 type SearchResult struct {
-	Place    *Place        `json:"place"` // nil om ingen plats hittades
-	Total    int           `json:"total"`
-	Average  *float64      `json:"average"`
-	Stations []obs.Station `json:"stations"`
+	Place            *Place          `json:"place"` // nil om ingen plats hittades
+	Total            int             `json:"total"`
+	Average          *float64        `json:"average"`
+	AverageFeelsLike *float64        `json:"averageFeelsLike"` // medel av mätpunkternas FeelsLike
+	Stations         []StationResult `json:"stations"`
 }
 
+// StationResult är en mätpunkt i sökresultatet tillsammans med hur kall
+// temperaturen känns.
+type StationResult struct {
+	obs.Station
+	FeelsLike *float64 `json:"feelsLike"` // nil när mätpunkten saknar temperatur
+}
+
+// FeelsLikeFunc ger hur kall en mätpunkts temperatur känns ("Känns som"),
+// eller nil om mätpunkten saknar temperatur.
+type FeelsLikeFunc func(obs.Station) *float64
+
 // Search tar fram den plats frågan avser och returnerar dess mätpunkter,
-// varmast först och de utan värde sist, högst limit stycken. Total och
-// Average gäller alla platsens mätpunkter.
+// varmast först och de utan värde sist, högst limit stycken. Total, Average
+// och AverageFeelsLike gäller alla platsens mätpunkter.
 //
 // Platsen är i första hand en med exakt det namnet ("Lund" ger Lunds kommun),
 // annars det bästa förslaget om det inte bygger på en felstavning – då
 // får besökaren i stället välja bland förslagen.
-func (s *Snapshot) Search(query string, limit int) SearchResult {
-	res := SearchResult{Stations: []obs.Station{}}
+func (s *Snapshot) Search(query string, limit int, feelsLike FeelsLikeFunc) SearchResult {
+	res := SearchResult{Stations: []StationResult{}}
 	p := s.resolve(query)
 	if p == nil {
 		return res
 	}
 	res.Place = &p.Place
 	res.Total = len(p.stations)
-	var sum float64
-	var n int
+	var temps, feels mean
 	for _, i := range p.stations {
 		st := s.stations[i]
+		felt := feelsLike(st)
 		if len(res.Stations) < limit {
-			res.Stations = append(res.Stations, st)
+			res.Stations = append(res.Stations, StationResult{Station: st, FeelsLike: felt})
 		}
-		if st.Temp != nil {
-			sum += *st.Temp
-			n++
-		}
+		temps.add(st.Temp)
+		feels.add(felt)
 	}
-	if n > 0 {
-		avg := math.Round(sum/float64(n)*10) / 10
-		res.Average = &avg
-	}
+	res.Average = temps.rounded()
+	res.AverageFeelsLike = feels.rounded()
 	return res
+}
+
+// mean är ett medelvärde av de värden som finns.
+type mean struct {
+	sum float64
+	n   int
+}
+
+func (m *mean) add(v *float64) {
+	if v != nil {
+		m.sum += *v
+		m.n++
+	}
+}
+
+// rounded ger medelvärdet med en decimal, eller nil om inga värden fanns.
+func (m mean) rounded() *float64 {
+	if m.n == 0 {
+		return nil
+	}
+	avg := math.Round(m.sum/float64(m.n)*10) / 10
+	return &avg
 }
 
 func (s *Snapshot) resolve(query string) *place {

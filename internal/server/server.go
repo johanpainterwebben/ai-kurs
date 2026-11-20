@@ -47,18 +47,21 @@ type Index interface {
 
 // Server håller beroendena för HTTP-hanterarna.
 type Server struct {
-	index  Index
-	static http.Handler
-	log    *slog.Logger
+	index     Index
+	feelsLike places.FeelsLikeFunc
+	static    http.Handler
+	log       *slog.Logger
 }
 
 // New skapar en server som serverar filerna i static som webbsida.
-func New(index Index, static fs.FS, log *slog.Logger) (*Server, error) {
+// feelsLike räknar ut "Känns som" för varje mätpunkt i sökresultatet; den
+// läser bara från cachen och får aldrig anropa en extern källa.
+func New(index Index, feelsLike places.FeelsLikeFunc, static fs.FS, log *slog.Logger) (*Server, error) {
 	h, err := staticHandler(static)
 	if err != nil {
 		return nil, err
 	}
-	return &Server{index: index, static: h, log: log}, nil
+	return &Server{index: index, feelsLike: feelsLike, static: h, log: log}, nil
 }
 
 // Handler returnerar alla routes.

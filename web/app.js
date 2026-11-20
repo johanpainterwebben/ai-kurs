@@ -115,6 +115,7 @@ function render(data) {
     const st = data.stations[0];
     document.getElementById("summary-meta").textContent = `Mätt ${formatUpdated(st.measuredAt)}`;
     setTemp(document.getElementById("summary-temp"), st.temp, "temp temp-lg");
+    setFeelsLike(document.getElementById("summary-feels"), st.feelsLike);
     summaryLink.href = isTnuURL(st.url) ? st.url : "https://www.temperatur.nu/";
     summaryLink.hidden = false;
     list.replaceChildren();
@@ -126,16 +127,19 @@ function render(data) {
     ];
     document.getElementById("summary-meta").textContent = meta.filter(Boolean).join(" · ");
     setTemp(document.getElementById("summary-temp"), data.average, "temp temp-lg");
+    setFeelsLike(document.getElementById("summary-feels"), data.averageFeelsLike);
     summaryLink.hidden = true;
     list.replaceChildren(...data.stations.map(stationItem));
   }
   const shownTemp = total === 1 ? data.stations[0].temp : data.average;
+  const shownFeelsLike = total === 1 ? data.stations[0].feelsLike : data.averageFeelsLike;
   summaryEl.dataset.level = shownTemp == null ? "none" : tempLevel(shownTemp);
-  showWeather(shownTemp);
+  showWeather(shownTemp, shownFeelsLike);
   summaryEl.hidden = false;
 
-  const tempText = data.average == null ? "värde saknas" : formatTemp(data.average);
-  const spokenSummary = total === 1 ? tempText : `${count}, ${data.average == null ? tempText : `snitt ${tempText}`}`;
+  const feelsText = shownFeelsLike == null ? "" : `, ${feelsLikeText(shownFeelsLike).toLowerCase()}`;
+  const tempText = shownTemp == null ? "värde saknas" : `${formatTemp(shownTemp)}${feelsText}`;
+  const spokenSummary = total === 1 ? tempText : `${count}, ${shownTemp == null ? tempText : `snitt ${tempText}`}`;
   const staleNotice = data.stale ? ` Obs: datan kan vara inaktuell, den hämtades ${formatFetched(data.fetchedAt)}.` : "";
   showStatus(`${place.label}: ${spokenSummary}.${staleNotice}`, { visuallyHidden: true });
 }
@@ -181,7 +185,9 @@ function stationItem(s) {
   const newTab = document.createElement("span");
   newTab.className = "visually-hidden";
   newTab.textContent = "(öppnas i ny flik på temperatur.nu)";
-  name.append(title, meta, newTab);
+  const feels = document.createElement("span");
+  setFeelsLike(feels, s.feelsLike);
+  name.append(title, meta, feels, newTab);
 
   const temp = document.createElement("span");
   setTemp(temp, s.temp, "temp");
@@ -203,6 +209,18 @@ function setTemp(el, t, baseClass) {
   el.className = `${baseClass} temp-${tempLevel(t)}`;
   el.textContent = formatTemp(t);
   el.removeAttribute("title");
+}
+
+// "Känns som" räknas ut av servern med vinden inräknad. Den saknas bara när
+// mätpunkten saknar temperatur, och då visas ingenting.
+function setFeelsLike(el, t) {
+  el.className = "feels-like";
+  el.textContent = t == null ? "" : feelsLikeText(t);
+  el.hidden = t == null;
+}
+
+function feelsLikeText(t) {
+  return `Känns som ${formatTemp(t)}`;
 }
 
 function tempLevel(t) {
@@ -250,8 +268,10 @@ const OUTFITS = [
 // Utgångsklädseln innan man sökt eller när värde saknas.
 const NEUTRAL_TEMP = 17;
 
-function showWeather(t) {
-  dressFigure(t);
+// Bakgrunden följer den uppmätta temperaturen, men gubben klär sig efter
+// hur kallt det känns.
+function showWeather(t, feelsLike = t) {
+  dressFigure(feelsLike);
   if (t == null) {
     delete document.documentElement.dataset.climate;
   } else {
@@ -266,7 +286,7 @@ function dressFigure(t) {
   }
   figureTitle.textContent = t == null
     ? `Gubbe i ${outfit.text} på väg ut genom dörren`
-    : `Gubbe på väg ut, klädd för ${formatTemp(t)}: ${outfit.text}`;
+    : `Gubbe på väg ut, klädd för att det känns som ${formatTemp(t)}: ${outfit.text}`;
 }
 
 // ---- Förslag medan man skriver ----

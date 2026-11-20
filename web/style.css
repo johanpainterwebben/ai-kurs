@@ -529,6 +529,15 @@ h1, h2, p { margin: 0; }
   font-size: 1rem;
 }
 
+/* "Känns som": temperaturen med vinden inräknad. */
+.feels-like {
+  display: block;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.summary .feels-like { margin-top: 6px; }
+
 /* ---- Temperaturetiketter ---- */
 
 .temp {
@@ -577,8 +586,18 @@ h1, h2, p { margin: 0; }
 /* ---- Källhänvisning ---- */
 
 .source {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
   padding: 32px 16px 48px;
   text-align: center;
+}
+
+.source-note {
+  flex-basis: 100%;
+  color: var(--text-2);
+  font-size: 1rem;
 }
 
 /* Ett vitt kort i båda lägena, eftersom loggan är gjord för vit bakgrund. */

@@ -100,6 +100,15 @@ func (f *Feed[T]) Get(ctx context.Context) (T, error) {
 	return zero, f.lastErr
 }
 
+// Latest returnerar senast hämtade värdet utan att någonsin vänta, och false
+// om inget värde har hämtats än. Till skillnad från Get väntar den inte ens
+// på den första hämtningen, så en besökare väntar aldrig på källan.
+func (f *Feed[T]) Latest() (T, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.value, f.loaded
+}
+
 // Loaded anger om en hämtning har lyckats minst en gång.
 func (f *Feed[T]) Loaded() bool {
 	f.mu.Lock()

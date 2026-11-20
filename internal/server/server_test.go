@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -33,6 +34,16 @@ func (c *countingSource) AllStations(ctx context.Context) ([]obs.Station, error)
 	return c.Source.AllStations(ctx)
 }
 
+// twoDegreesColder står för vindkylan i testerna: servern ska bara föra
+// vidare det som räknas ut, inte räkna själv.
+func twoDegreesColder(st obs.Station) *float64 {
+	if st.Temp == nil {
+		return nil
+	}
+	v := *st.Temp - 2
+	return &v
+}
+
 func newTestServer(t *testing.T, err error) (http.Handler, *countingSource) {
 	t.Helper()
 	mock, e := tnumock.New()
@@ -45,7 +56,7 @@ func newTestServer(t *testing.T, err error) (http.Handler, *countingSource) {
 		"index.html":       {Data: []byte("<!doctype html>")},
 		"fonts/font.woff2": {Data: []byte("font")},
 	}
-	srv, e := New(places.NewIndex(src, 5*time.Minute, log), static, log)
+	srv, e := New(places.NewIndex(src, 5*time.Minute, log), twoDegreesColder, static, log)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -114,7 +125,7 @@ func TestSearchReportsStaleData(t *testing.T) {
 	mock, _ := tnumock.New()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	idx := staleIndex{places.NewIndex(mock, 5*time.Minute, log)}
-	srv, err := New(idx, fstest.MapFS{}, log)
+	srv, err := New(idx, twoDegreesColder, fstest.MapFS{}, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +236,7 @@ func TestHealthz(t *testing.T) {
 	mock, _ := tnumock.New()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	idx := staleIndex{places.NewIndex(mock, 5*time.Minute, log)}
-	srv, err := New(idx, fstest.MapFS{}, log)
+	srv, err := New(idx, twoDegreesColder, fstest.MapFS{}, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,5 +271,30 @@ func TestValidationMessageUsesLimits(t *testing.T) {
 	_, body := get[map[string]string](t, h, "/api/search", "a")
 	if want := "Skriv mellan 2 och 50 tecken."; body["error"] != want {
 		t.Errorf("felmeddelande %q, vill ha %q", body["error"], want)
+	}
+}
+
+func TestSearchIncludesFeelsLike(t *testing.T) {
+	h, _ := newTestServer(t, nil)
+	_, body := get[map[string]any](t, h, "/api/search", "Uppsala")
+	avg, okAvg := body["average"].(float64)
+	avgFelt, okFelt := body["averageFeelsLike"].(float64)
+	if !okAvg || !okFelt || math.Abs(avgFelt-(avg-2)) > 0.11 {
+		t.Errorf("averageFeelsLike = %v, vill ha average (%v) minus 2", body["averageFeelsLike"], body["average"])
+	}
+	stations, _ := body["stations"].([]any)
+	if len(stations) == 0 {
+		t.Fatal("inga mätpunkter i svaret")
+	}
+	for _, raw := range stations {
+		st, _ := raw.(map[string]any)
+		temp, hasTemp := st["temp"].(float64)
+		felt, hasFelt := st["feelsLike"].(float64)
+		if hasTemp != hasFelt || (hasTemp && math.Abs(felt-(temp-2)) > 1e-9) {
+			t.Errorf("%v: temp %v, feelsLike %v", st["id"], st["temp"], st["feelsLike"])
+		}
+		if _, ok := st["feelsLike"]; !ok {
+			t.Errorf("%v: fältet feelsLike saknas", st["id"])
+		}
 	}
 }

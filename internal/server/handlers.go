@@ -23,7 +23,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, r, cacheSearch, func(snap *places.Snapshot) any {
 		res := searchResponse{
 			Query:        q,
-			SearchResult: snap.Search(q, maxStations),
+			SearchResult: snap.Search(q, maxStations, s.feelsLike),
 			FetchedAt:    snap.FetchedAt.UTC(),
 			Stale:        s.index.Stale(),
 			DidYouMean:   []places.Place{},

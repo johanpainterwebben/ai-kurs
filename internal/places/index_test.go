@@ -42,7 +42,7 @@ func TestIndexBuildsSearchableSnapshot(t *testing.T) {
 	if snap.FetchedAt.IsZero() {
 		t.Error("FetchedAt ska vara satt")
 	}
-	if res := snap.Search("Alby", 10); res.Place == nil || res.Total != 1 {
+	if res := snap.Search("Alby", 10, sameAsTemp); res.Place == nil || res.Total != 1 {
 		t.Errorf("Alby hittades inte: %+v", res)
 	}
 }

@@ -317,3 +317,30 @@ func TestFeedsAreIndependent(t *testing.T) {
 		t.Fatal("den fungerande källan ska inte vara inaktuell")
 	}
 }
+
+func TestLatestNeverWaits(t *testing.T) {
+	src := &fakeSource{release: make(chan struct{})}
+	f, _ := newTestFeed(src.fetch)
+	if _, ok := f.Latest(); ok {
+		t.Fatal("Latest ska ge false innan något har hämtats")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go f.Run(ctx)
+	if _, ok := f.Latest(); ok {
+		t.Fatal("Latest ska inte vänta på en pågående hämtning")
+	}
+	close(src.release)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if v, ok := f.Latest(); ok {
+			if v != 1 {
+				t.Fatalf("Latest = %d, vill ha 1", v)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("Latest gav aldrig det hämtade värdet")
+}

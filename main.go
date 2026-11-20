@@ -19,10 +19,13 @@ import (
 	"time"
 
 	"temperatur/internal/config"
+	"temperatur/internal/feed"
 	"temperatur/internal/obs"
 	"temperatur/internal/places"
 	"temperatur/internal/server"
+	"temperatur/internal/smhi"
 	"temperatur/internal/tnu"
+	"temperatur/internal/wind"
 )
 
 //go:embed web
@@ -65,11 +68,18 @@ func run(log *slog.Logger) error {
 	index := places.NewIndex(src, cfg.RefreshInterval, log)
 	go index.Run(ctx)
 
+	// Vinden från SMHI hämtas separat. Om SMHI är nere ligger den senaste
+	// vinden kvar, och utan vind är "Känns som" samma som temperaturen.
+	feelsLike, err := newFeelsLike(ctx, log)
+	if err != nil {
+		return err
+	}
+
 	static, err := fs.Sub(webFiles, "web")
 	if err != nil {
 		return err
 	}
-	s, err := server.New(index, static, log)
+	s, err := server.New(index, feelsLike, static, log)
 	if err != nil {
 		return err
 	}
@@ -97,6 +107,24 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+func newFeelsLike(ctx context.Context, log *slog.Logger) (places.FeelsLikeFunc, error) {
+	mapping, err := wind.LoadMapping()
+	if err != nil {
+		return nil, err
+	}
+	client := smhi.NewClient(nil)
+	fetch := func(ctx context.Context) (map[string]smhi.Wind, error) {
+		winds, err := client.LatestWind(ctx)
+		if err == nil {
+			log.Info("hämtade vind från SMHI", "stationer", len(winds))
+		}
+		return winds, err
+	}
+	winds := feed.New("vind", smhi.RefreshInterval, fetch, log)
+	go winds.Run(ctx)
+	return wind.NewEstimator(mapping, winds.Latest).FeelsLike, nil
 }
 
 func newSource(cfg config.Config, log *slog.Logger) (obs.Source, error) {

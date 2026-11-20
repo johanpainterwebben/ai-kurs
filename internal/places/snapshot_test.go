@@ -31,7 +31,7 @@ func fixtureSnapshot() *Snapshot {
 }
 
 func TestFixtureKommunCollectsItsStations(t *testing.T) {
-	res := fixtureSnapshot().Search("lund", 100)
+	res := fixtureSnapshot().Search("lund", 100, sameAsTemp)
 	if res.Place == nil || res.Place.Label != "Lunds kommun" || res.Place.Kind != KindKommun {
 		t.Fatalf("Search(lund) = %+v", res.Place)
 	}
@@ -56,7 +56,7 @@ func TestFixtureOrtWithKommunNameIsNotListedTwice(t *testing.T) {
 }
 
 func TestFixtureUniqueSubLocationIsFoundByItsOwnName(t *testing.T) {
-	res := fixtureSnapshot().Search("värpinge", 100)
+	res := fixtureSnapshot().Search("värpinge", 100, sameAsTemp)
 	if res.Place == nil || res.Place.Kind != KindPlats || res.Place.Query != "Lund/Värpinge" || res.Total != 1 {
 		t.Fatalf("Search(värpinge) = %+v", res.Place)
 	}
@@ -64,7 +64,7 @@ func TestFixtureUniqueSubLocationIsFoundByItsOwnName(t *testing.T) {
 
 func TestFixtureSharedSubLocationNeedsTheOrt(t *testing.T) {
 	s := fixtureSnapshot()
-	if res := s.Search("centrum", 100); res.Place != nil {
+	if res := s.Search("centrum", 100, sameAsTemp); res.Place != nil {
 		t.Errorf("centrum finns på två ställen och ska inte gissas: %+v", res.Place)
 	}
 	got := s.Suggest("centrum", 8)
@@ -79,7 +79,7 @@ func TestFixtureSharedSubLocationNeedsTheOrt(t *testing.T) {
 	if !details["Lunds kommun"] || !details["Alfta · Ovanåkers kommun"] {
 		t.Errorf("förslagen ska skilja orterna åt: %+v", got)
 	}
-	if res := s.Search("Alfta/Centrum", 100); res.Place == nil || res.Total != 1 {
+	if res := s.Search("Alfta/Centrum", 100, sameAsTemp); res.Place == nil || res.Total != 1 {
 		t.Errorf("Alfta/Centrum ska ge exakt en plats: %+v", res.Place)
 	}
 }
@@ -109,7 +109,7 @@ func TestFixtureSameNamedSubLocationJoinsOrt(t *testing.T) {
 	if n != 1 {
 		t.Errorf("Svärtinge ska finnas en gång, fanns %d", n)
 	}
-	if res := s.Search("svärtinge", 100); res.Place == nil || res.Total != 2 {
+	if res := s.Search("svärtinge", 100, sameAsTemp); res.Place == nil || res.Total != 2 {
 		t.Errorf("orten ska ha båda mätpunkterna: %+v", res)
 	}
 }
