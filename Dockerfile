@@ -1,4 +1,4 @@
-FROM golang:1.26-alpine AS build
+FROM golang:1.27-alpine AS build
 WORKDIR /src
 # Moduler först, så att de cachas så länge go.mod/go.sum inte ändras.
 COPY go.mod go.sum* ./
