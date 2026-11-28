@@ -1,5 +1,7 @@
 # Vad ska jag ha för kläder?
 
+[![CI/CD](https://github.com/johanpainterwebben/ai-kurs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/johanpainterwebben/ai-kurs/actions/workflows/ci.yml)
+
 Sök på en ort och se temperaturen just nu, hur kallt det känns när vinden räknas in och vad du ska ha på dig.
 
 **Live:** https://temperatur.pilros.se
