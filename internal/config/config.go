@@ -46,7 +46,7 @@ func Load(getenv func(string) string) (Config, error) {
 	if v := getenv("REFRESH_INTERVAL"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
-			return Config{}, fmt.Errorf("REFRESH_INTERVAL: %w", err)
+			return Config{}, fmt.Errorf(`REFRESH_INTERVAL måste vara en tid som "10m" eller "15m": %w`, err)
 		}
 		cfg.RefreshInterval = max(d, MinRefreshInterval)
 	}

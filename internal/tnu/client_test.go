@@ -104,6 +104,16 @@ func TestAllStationsHandlesMissingValuesAndBlocked(t *testing.T) {
 	}
 }
 
+func TestEmptyResponseIsAnError(t *testing.T) {
+	var reqs []string
+	for _, body := range []string{`{"client":"signed","stations":[]}`, `{"client":"signed"}`} {
+		c := fixtureClient(t, "k", body, &reqs)
+		if _, err := c.AllStations(context.Background()); !errors.Is(err, ErrNoStations) {
+			t.Errorf("%s: err = %v, vill ha ErrNoStations så att cachen inte töms", body, err)
+		}
+	}
+}
+
 func TestErrorsDoNotLeakURL(t *testing.T) {
 	hc := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("connection refused")
@@ -124,7 +134,7 @@ func TestErrorsDoNotLeakURL(t *testing.T) {
 
 func TestUnsignedBudget(t *testing.T) {
 	var reqs []string
-	c := fixtureClient(t, "", `{"client":"unsigned","stations":[]}`, &reqs)
+	c := fixtureClient(t, "", `{"client":"unsigned","stations":[{"id":"x"}]}`, &reqs)
 	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	c.budget = budget.New(UnsignedHourlyLimit, time.Hour, func() time.Time { return now })
 
@@ -148,7 +158,7 @@ func TestUnsignedBudget(t *testing.T) {
 
 func TestSignedHasNoLocalBudget(t *testing.T) {
 	var reqs []string
-	c := fixtureClient(t, "k", `{"client":"signed","stations":[]}`, &reqs)
+	c := fixtureClient(t, "k", `{"client":"signed","stations":[{"id":"x"}]}`, &reqs)
 	for range UnsignedHourlyLimit + 5 {
 		if _, err := c.AllStations(context.Background()); err != nil {
 			t.Fatal(err)

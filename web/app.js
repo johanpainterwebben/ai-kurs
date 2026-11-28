@@ -1,5 +1,13 @@
 "use strict";
 
+// Webbsidans logik:
+//   1. Sökning: formuläret eller adressen (?q=) → search() → /api/search → render().
+//   2. Förslag medan man skriver: input → fetchSuggestions() → /api/suggest → listan
+//      under sökfältet (en combobox).
+//   3. Gubben klär sig efter "Känns som", bakgrunden följer den uppmätta temperaturen.
+// Temperaturer och "Känns som" räknas ut på servern. Allt som kommer från servern
+// eller besökaren sätts med textContent, aldrig som HTML.
+
 const form = document.getElementById("search-form");
 const input = document.getElementById("q");
 const clearButton = document.getElementById("clear");
@@ -25,6 +33,11 @@ let suggestTimer = 0;
 let suggestController = null;
 const suggestCache = new Map();
 const SUGGEST_CACHE_MAX = 200;
+const SEARCH_TIMEOUT_MS = 10_000;
+
+const MSG_TIMEOUT = "Servern svarade inte i tid. Försök igen om en stund.";
+const MSG_OFFLINE = "Kunde inte nå servern. Kontrollera internetanslutningen och försök igen.";
+const MSG_SERVER_ERROR = "Servern kunde inte svara just nu. Försök igen om en stund.";
 
 // ---- Sökning ----
 
@@ -63,85 +76,131 @@ function loadFromURL() {
 
 async function search(q) {
   searchController?.abort();
-  searchController = new AbortController();
+  const controller = new AbortController();
+  searchController = controller;
   clearResults();
   showStatus("Söker…");
 
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(SEARCH_TIMEOUT_MS)]);
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: searchController.signal });
-    const data = await res.json();
-    if (!res.ok) {
-      showStatus(data.error || "Något gick fel.", { error: true });
-      return;
+    const { ok, data } = await fetchJSON(`/api/search?q=${encodeURIComponent(q)}`, signal);
+    if (controller !== searchController) return; // en nyare sökning har tagit över
+    if (ok && data) {
+      render(data);
+    } else {
+      showStatus(data?.error || MSG_SERVER_ERROR, { error: true });
     }
-    render(data);
   } catch (err) {
-    if (err.name === "AbortError") return;
-    showStatus("Kunde inte nå servern.", { error: true });
+    if (controller !== searchController || err.name === "AbortError") return;
+    showStatus(err.name === "TimeoutError" ? MSG_TIMEOUT : MSG_OFFLINE, { error: true });
   }
+}
+
+// fetchJSON hämtar ett svar och tolkar det som JSON. En felsida som inte är
+// JSON (t.ex. HTML från en proxy vid 502) ger data = null i stället för ett
+// undantag, så att den inte misstas för att servern inte gick att nå.
+async function fetchJSON(url, signal) {
+  const res = await fetch(url, { signal });
+  const isJSON = res.headers.get("Content-Type")?.startsWith("application/json");
+  const data = isJSON ? await res.json().catch(nullUnlessAborted) : null;
+  return { ok: res.ok, data };
+}
+
+function nullUnlessAborted(err) {
+  if (err.name === "AbortError" || err.name === "TimeoutError") throw err;
+  return null;
 }
 
 function render(data) {
   if (!data.place) {
-    const sameName = (p) => p.label.localeCompare(data.query, "sv", { sensitivity: "accent" }) === 0;
-    const ambiguous = data.didYouMean.length > 1 && data.didYouMean.every(sameName);
-    showStatus(ambiguous
-      ? `Det finns flera platser som heter ”${data.query}”.`
-      : `Hittade ingen ort eller kommun som heter ”${data.query}”.`);
-    renderDidYouMean(data.didYouMean);
+    renderNoPlace(data);
     return;
   }
-
   // Visa vilken plats sökningen ledde till, t.ex. "lund" → "Lunds kommun"
   // eller "tre högars" → "Lund/Tre Högars väg".
-  const { place, total } = data;
-  setQuery(place.query);
+  setQuery(data.place.query);
+  const shown = shownValues(data);
+  renderStaleNotice(data);
+  renderSummary(data.place, shown);
+  if (data.total === 1) {
+    renderSingleStation(data.stations[0]);
+  } else {
+    renderStationList(data);
+  }
+  showWeather(shown.temp, shown.feelsLike);
+  announce(data, shown);
+}
 
-  const shown = data.stations.length;
-  const count = `${total} ${total === 1 ? "mätpunkt" : "mätpunkter"}`;
-  const summaryLink = document.getElementById("summary-link");
-  document.getElementById("summary-title").textContent = place.label;
-  document.getElementById("summary-detail").textContent = place.detail;
+function renderNoPlace(data) {
+  const sameName = (p) => p.label.localeCompare(data.query, "sv", { sensitivity: "accent" }) === 0;
+  const ambiguous = data.didYouMean.length > 1 && data.didYouMean.every(sameName);
+  showStatus(ambiguous
+    ? `Det finns flera platser som heter ”${data.query}”.`
+    : `Hittade ingen ort eller kommun som heter ”${data.query}”.`);
+  renderDidYouMean(data.didYouMean);
+}
 
+// shownValues är det sammanfattningen visar: mätpunktens egna värden när
+// platsen bara har en, annars snittet för hela platsen.
+function shownValues(data) {
+  if (data.total === 1) {
+    const st = data.stations[0];
+    return { temp: st.temp, feelsLike: st.feelsLike };
+  }
+  return { temp: data.average, feelsLike: data.averageFeelsLike };
+}
+
+function renderStaleNotice(data) {
   if (data.stale) {
     document.getElementById("stale-text").textContent =
       `Det har varit problem att hämta ny data från temperatur.nu. Det som visas hämtades ${formatFetched(data.fetchedAt)}.`;
   }
   staleEl.hidden = !data.stale;
+}
 
-  if (total === 1) {
-    // En enda mätpunkt: visa den bara i kortet, under det namn man valde,
-    // i stället för samma träff en gång till i en lista.
-    const st = data.stations[0];
-    document.getElementById("summary-meta").textContent = `Mätt ${formatUpdated(st.measuredAt)}`;
-    setTemp(document.getElementById("summary-temp"), st.temp, "temp temp-lg");
-    setFeelsLike(document.getElementById("summary-feels"), st.feelsLike);
-    summaryLink.href = isTnuURL(st.url) ? st.url : "https://www.temperatur.nu/";
-    summaryLink.hidden = false;
-    list.replaceChildren();
-  } else {
-    const meta = [
-      data.average != null ? `Snitt av ${count}` : count,
-      shown < total ? `visar ${shown}` : "",
-      `uppdaterat ${formatFetched(data.fetchedAt)}`,
-    ];
-    document.getElementById("summary-meta").textContent = meta.filter(Boolean).join(" · ");
-    setTemp(document.getElementById("summary-temp"), data.average, "temp temp-lg");
-    setFeelsLike(document.getElementById("summary-feels"), data.averageFeelsLike);
-    summaryLink.hidden = true;
-    list.replaceChildren(...data.stations.map(stationItem));
-  }
-  const shownTemp = total === 1 ? data.stations[0].temp : data.average;
-  const shownFeelsLike = total === 1 ? data.stations[0].feelsLike : data.averageFeelsLike;
-  summaryEl.dataset.level = shownTemp == null ? "none" : tempLevel(shownTemp);
-  showWeather(shownTemp, shownFeelsLike);
+function renderSummary(place, shown) {
+  document.getElementById("summary-title").textContent = place.label;
+  document.getElementById("summary-detail").textContent = place.detail;
+  setTemp(document.getElementById("summary-temp"), shown.temp, "temp temp-lg");
+  setFeelsLike(document.getElementById("summary-feels"), shown.feelsLike);
+  summaryEl.dataset.level = shown.temp == null ? "none" : tempLevel(shown.temp);
   summaryEl.hidden = false;
+}
 
-  const feelsText = shownFeelsLike == null ? "" : `, ${feelsLikeText(shownFeelsLike).toLowerCase()}`;
-  const tempText = shownTemp == null ? "värde saknas" : `${formatTemp(shownTemp)}${feelsText}`;
-  const spokenSummary = total === 1 ? tempText : `${count}, ${shownTemp == null ? tempText : `snitt ${tempText}`}`;
+// En enda mätpunkt visas bara i kortet, under det namn man valde, i stället
+// för samma träff en gång till i en lista.
+function renderSingleStation(st) {
+  document.getElementById("summary-meta").textContent = `Mätt ${formatUpdated(st.measuredAt)}`;
+  const link = document.getElementById("summary-link");
+  link.href = isTnuURL(st.url) ? st.url : "https://www.temperatur.nu/";
+  link.hidden = false;
+  list.replaceChildren();
+}
+
+function renderStationList(data) {
+  const shownCount = data.stations.length;
+  const meta = [
+    data.average != null ? `Snitt av ${countText(data.total)}` : countText(data.total),
+    shownCount < data.total ? `visar ${shownCount}` : "",
+    `uppdaterat ${formatFetched(data.fetchedAt)}`,
+  ];
+  document.getElementById("summary-meta").textContent = meta.filter(Boolean).join(" · ");
+  document.getElementById("summary-link").hidden = true;
+  list.replaceChildren(...data.stations.map(stationItem));
+}
+
+function countText(total) {
+  return `${total} ${total === 1 ? "mätpunkt" : "mätpunkter"}`;
+}
+
+// announce läser upp resultatet för skärmläsare via den dolda statusraden,
+// eftersom kortet och listan byts ut utan att fokus flyttas.
+function announce(data, shown) {
+  const feelsText = shown.feelsLike == null ? "" : `, ${feelsLikeText(shown.feelsLike).toLowerCase()}`;
+  const tempText = shown.temp == null ? "värde saknas" : `${formatTemp(shown.temp)}${feelsText}`;
+  const spoken = data.total === 1 ? tempText : `${countText(data.total)}, ${shown.temp == null ? tempText : `snitt ${tempText}`}`;
   const staleNotice = data.stale ? ` Obs: datan kan vara inaktuell, den hämtades ${formatFetched(data.fetchedAt)}.` : "";
-  showStatus(`${place.label}: ${spokenSummary}.${staleNotice}`, { visuallyHidden: true });
+  showStatus(`${data.place.label}: ${spoken}.${staleNotice}`, { visuallyHidden: true });
 }
 
 function renderDidYouMean(places) {
@@ -348,9 +407,8 @@ async function fetchSuggestions(q) {
   suggestController?.abort();
   suggestController = new AbortController();
   try {
-    const res = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`, { signal: suggestController.signal });
-    if (!res.ok) return;
-    const data = await res.json();
+    const { ok, data } = await fetchJSON(`/api/suggest?q=${encodeURIComponent(q)}`, suggestController.signal);
+    if (!ok || !data) return;
     if (suggestCache.size >= SUGGEST_CACHE_MAX) {
       suggestCache.delete(suggestCache.keys().next().value); // äldsta först
     }

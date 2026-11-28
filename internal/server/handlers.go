@@ -14,10 +14,24 @@ import (
 	"temperatur/internal/places"
 )
 
+// Meddelanden till besökaren. De ska säga vad som hände och vad man kan göra.
+const (
+	msgBadCharacters = "Sökningen innehåller tecken som inte går att använda. Skriv bara namnet på en ort eller kommun."
+	msgSourceBusy    = "Temperaturerna kan inte hämtas just nu. Försök igen om några minuter."
+	msgSourceFailed  = "Kunde inte hämta temperaturerna från temperatur.nu. Försök igen om några minuter."
+	msgInternalError = "Något gick fel på servern. Försök igen om en stund."
+)
+
+var msgBadLength = fmt.Sprintf("Skriv mellan %d och %d tecken.", minQueryLen, maxQueryLen)
+
+// internalErrorJSON skickas när svaret inte går att koda som JSON. Den är
+// skriven för hand, eftersom det är kodningen som har misslyckats.
+const internalErrorJSON = `{"error":"` + msgInternalError + `"}` + "\n"
+
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	q, ok := query(r)
-	if !ok {
-		s.writeError(w, http.StatusBadRequest, fmt.Sprintf("Skriv mellan %d och %d tecken.", minQueryLen, maxQueryLen))
+	q, problem := query(r)
+	if problem != "" {
+		s.writeError(w, http.StatusBadRequest, problem)
 		return
 	}
 	s.respond(w, r, cacheSearch, func(snap *places.Snapshot) any {
@@ -36,8 +50,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSuggest(w http.ResponseWriter, r *http.Request) {
-	q, ok := query(r)
-	if !ok {
+	q, problem := query(r)
+	if problem != "" {
 		s.writeJSON(w, http.StatusOK, suggestResponse{Suggestions: []places.Place{}})
 		return
 	}
@@ -62,14 +76,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// query avvisar styrtecken (t.ex. NUL) så att de inte når loggar eller annan kod.
-func query(r *http.Request) (string, bool) {
-	q := strings.Join(strings.Fields(r.URL.Query().Get("q")), " ")
+// query läser sökfrågan. Är den inte godtagbar är problem ett meddelande till
+// besökaren om varför. Styrtecken (t.ex. NUL) avvisas så att de inte når
+// loggar eller annan kod.
+func query(r *http.Request) (q, problem string) {
+	q = strings.Join(strings.Fields(r.URL.Query().Get("q")), " ")
 	if strings.IndexFunc(q, unicode.IsControl) >= 0 || !utf8.ValidString(q) {
-		return "", false
+		return "", msgBadCharacters
 	}
-	n := utf8.RuneCountInString(q)
-	return q, n >= minQueryLen && n <= maxQueryLen
+	if n := utf8.RuneCountInString(q); n < minQueryLen || n > maxQueryLen {
+		return q, msgBadLength
+	}
+	return q, ""
 }
 
 func (s *Server) respond(w http.ResponseWriter, r *http.Request, cacheControl string, answer func(*places.Snapshot) any) {
@@ -81,17 +99,27 @@ func (s *Server) respond(w http.ResponseWriter, r *http.Request, cacheControl st
 	s.writeJSON(w, http.StatusOK, answer(snap))
 }
 
+// snapshot hämtar listan att svara från, eller skriver ett felsvar. Felet
+// kan bara uppstå innan någon lista har hämtats, eftersom en hämtad lista
+// alltid finns kvar. Statuskoderna följer vems felet är:
+//   - 503 när servern själv avstår från att anropa källan för att inte
+//     överskrida anropsgränsen. Det går över av sig självt.
+//   - 502 när källan inte svarade eller svarade fel (även när klienten är
+//     blockerad; orsaken står i loggen från feed).
+//   - Inget svar alls när besökaren har gått, eftersom ingen tar emot det.
+//
+// Ett nytt försök görs tidigast ett intervall senare (se feed.Feed), därför
+// ber meddelandena besökaren vänta några minuter.
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) (*places.Snapshot, bool) {
 	snap, err := s.index.Get(r.Context())
 	switch {
 	case err == nil:
 		return snap, true
 	case errors.Is(err, obs.ErrBudgetExhausted):
-		s.writeError(w, http.StatusServiceUnavailable, "Tjänsten är tillfälligt överbelastad. Försök igen om en stund.")
+		s.writeError(w, http.StatusServiceUnavailable, msgSourceBusy)
 	case errors.Is(err, context.Canceled):
-		// Besökaren gick innan svaret var klart.
 	default:
-		s.writeError(w, http.StatusBadGateway, "Kunde inte hämta data från temperatur.nu just nu.")
+		s.writeError(w, http.StatusBadGateway, msgSourceFailed)
 	}
 	return nil, false
 }
@@ -101,12 +129,13 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, v any) {
 	if err != nil {
 		s.log.Error("kunde inte skapa JSON-svar", "err", err)
 		w.Header().Del("Cache-Control")
-		http.Error(w, "Internt fel.", http.StatusInternalServerError)
-		return
+		status, b = http.StatusInternalServerError, []byte(internalErrorJSON)
+	} else {
+		b = append(b, '\n')
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	s.write(w, append(b, '\n'))
+	s.write(w, b)
 }
 
 func (s *Server) writeText(w http.ResponseWriter, text string) {

@@ -59,7 +59,7 @@ func TestLoadRefreshInterval(t *testing.T) {
 
 func TestLoadRejectsInvalidInterval(t *testing.T) {
 	_, err := Load(env(map[string]string{"TNU_MOCK": "1", "REFRESH_INTERVAL": "snart"}))
-	if err == nil || !strings.Contains(err.Error(), "REFRESH_INTERVAL") {
+	if err == nil || !strings.Contains(err.Error(), "REFRESH_INTERVAL") || !strings.Contains(err.Error(), `"10m"`) {
 		t.Errorf("err = %v", err)
 	}
 }

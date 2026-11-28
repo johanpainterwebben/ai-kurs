@@ -16,7 +16,11 @@ import (
 )
 
 // StaleAfterFailures är hur många misslyckade hämtningar i rad som tolereras
-// innan datan räknas som inaktuell (se Stale).
+// innan datan räknas som inaktuell (se Stale). Gränsen räknas i försök, inte
+// i tid, så tiden beror på källans intervall: datan räknas som inaktuell vid
+// det fjärde misslyckade försöket och är då ungefär fyra intervall gammal –
+// cirka 40 minuter för temperatur.nu (10 minuter) och 2 timmar för SMHI
+// (30 minuter).
 const StaleAfterFailures = 3
 
 // fetchTimeout är hur länge en enskild hämtning får ta.

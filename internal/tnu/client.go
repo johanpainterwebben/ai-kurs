@@ -42,6 +42,11 @@ const UnsignedHourlyLimit = 25
 // ErrBlocked betyder att API:et rapporterar att klienten är blockerad.
 var ErrBlocked = errors.New("tnu: klienten är blockerad av temperatur.nu")
 
+// ErrNoStations betyder att svaret inte innehöll några mätpunkter. Det
+// behandlas som ett fel, så att ett tomt svar aldrig ersätter en lista som
+// redan har hämtats.
+var ErrNoStations = errors.New("tnu: svaret innehöll inga mätpunkter")
+
 // Client anropar det riktiga API:et.
 type Client struct {
 	cli    string
@@ -74,6 +79,9 @@ func (c *Client) AllStations(ctx context.Context) ([]obs.Station, error) {
 	var resp apiResponse
 	if err := c.get(ctx, "verbose", &resp); err != nil {
 		return nil, err
+	}
+	if len(resp.Stations) == 0 {
+		return nil, ErrNoStations
 	}
 	return resp.stations(), nil
 }

@@ -298,3 +298,52 @@ func TestSearchIncludesFeelsLike(t *testing.T) {
 		}
 	}
 }
+
+func TestValidationExplainsWhatIsWrong(t *testing.T) {
+	h, _ := newTestServer(t, nil)
+	tests := map[string]string{
+		"a":                     "Skriv mellan 2 och 50 tecken.",
+		strings.Repeat("a", 51): "Skriv mellan 2 och 50 tecken.",
+		"lu\x07nd":              msgBadCharacters,
+		"lund\xff":              msgBadCharacters,
+	}
+	for q, want := range tests {
+		if _, body := get[map[string]string](t, h, "/api/search", q); body["error"] != want {
+			t.Errorf("%q: felmeddelande %q, vill ha %q", q, body["error"], want)
+		}
+	}
+}
+
+func TestUpstreamErrorMessagesTellVisitorToWait(t *testing.T) {
+	for _, err := range []error{obs.ErrBudgetExhausted, io.ErrUnexpectedEOF} {
+		h, _ := newTestServer(t, err)
+		_, body := get[map[string]string](t, h, "/api/search", "lund")
+		if !strings.Contains(body["error"], "Försök igen om några minuter") {
+			t.Errorf("%v: %q ska säga när det är värt att försöka igen", err, body["error"])
+		}
+		if strings.Contains(body["error"], "överbelastad") {
+			t.Errorf("%v: %q, servern är inte överbelastad", err, body["error"])
+		}
+	}
+}
+
+func TestInternalErrorIsJSON(t *testing.T) {
+	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	rec := httptest.NewRecorder()
+	rec.Header().Set("Cache-Control", cacheSearch)
+	s.writeJSON(rec, http.StatusOK, map[string]float64{"temp": math.NaN()}) // NaN går inte att koda som JSON
+
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("felsvaret ska vara JSON: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError || body["error"] != msgInternalError {
+		t.Errorf("status %d, %q", rec.Code, body["error"])
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, vill ha JSON", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "" {
+		t.Errorf("ett felsvar får inte cachas: Cache-Control = %q", cc)
+	}
+}

@@ -11,6 +11,10 @@ import (
 // Cache-Control för webbsidans filer.
 const (
 	// Fråga alltid om filen ändrats, så att en ny version syns direkt.
+	// Undantag: en CDN framför servern kan skriva om rubriken. Vissa gör det
+	// som standard för .js och .css (t.ex. max-age=14400), så en besökare kan
+	// då få ny HTML men upp till fyra timmar gammal JS och CSS.
+	// Lösningen är adresser som ändras med innehållet (app.js?v=<hash>).
 	cacheRevalidate = "no-cache"
 	// Typsnitt och bilder ändras sällan.
 	cacheLong = "public, max-age=86400"
