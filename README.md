@@ -151,3 +151,7 @@ go run ./cmd/windmap
 ## Utvecklat med
 
 Claude Code (agentdriven utveckling) som en del av kursen Next-Generation Software Development with AI.
+
+## Sammanfattning
+
+Designade och utvecklade en webbtjänst som visar temperaturen och hur kallt det känns där man är eller ska, med Go, vanlig HTML, CSS och JavaScript, Docker bakom nginx och Cloudflare Tunnel på en egen Linux-server och GitHub Actions, med hjälp av agentdriven utveckling (Claude Code). Projektet löser problemet att veta vad man ska ha på sig, genom att slå ihop lokala temperaturer från temperatur.nu med vind från SMHI, och är tillgängligt på https://temperatur.pilros.se.
