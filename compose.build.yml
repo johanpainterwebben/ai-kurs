@@ -1,0 +1,8 @@
+# Bygger imagen lokalt i stället för att använda den som CI har publicerat.
+# Används vid utveckling och första gången innan driftsättningen är uppsatt:
+#   docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+services:
+  temperatur:
+    build: .
+    image: temperatur:local
+    pull_policy: build

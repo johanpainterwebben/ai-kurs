@@ -60,7 +60,7 @@ go test ./...
 go test -run xxx -bench Suggest ./internal/places/
 ```
 
-I Docker körs projektet med `docker compose up -d --build`. Compose-filen förutsätter ett delat Docker-nätverk från driftmiljön. Hur servern sätts upp beskrivs i [DEPLOY.md](DEPLOY.md).
+I Docker byggs och körs projektet lokalt med `docker compose -f docker-compose.yml -f compose.build.yml up -d --build`. Compose-filen förutsätter ett delat Docker-nätverk från driftmiljön. Hur servern sätts upp beskrivs i [DEPLOY.md](DEPLOY.md).
 
 ## Arkitektur
 
@@ -85,9 +85,11 @@ ai-kurs/
 │   └── tnumock/        # sparade svar för utveckling och tester
 ├── web/                # webbsidan: HTML, CSS, JavaScript och typsnitt
 ├── docs/               # planer och granskningar
-├── .github/            # CI (tester, lint, sårbarhetsskanning) och publicering av imagen
+├── .github/            # CI/CD: tester, lint, sårbarhetsskanning, publicering och signering av imagen
+├── deploy/             # skript och systemd-timer som driftsätter nya versioner på servern
 ├── Dockerfile          # bygger en minimal image som kör som icke-root
-├── docker-compose.yml  # kör containern skrivskyddad och utan extra rättigheter
+├── docker-compose.yml  # kör den publicerade imagen skrivskyddad och utan extra rättigheter
+├── compose.build.yml   # bygger imagen lokalt i stället
 ├── DEPLOY.md           # hur servern sätts upp
 └── CLAUDE.md           # principer och instruktioner för den agentdrivna utvecklingen
 ```
@@ -103,7 +105,7 @@ ai-kurs/
 | Cache | I minnet i Go-processen | Datan är liten och ändras långsamt, så ingen databas behövs. |
 | Container | Docker, distroless-image | Kör som icke-root, med skrivskyddat filsystem och utan extra rättigheter. |
 | Ingång | Omvänd proxy och utgående tunnel | Servern har inga öppna inkommande portar. |
-| CI | GitHub Actions och GHCR | Tester, `golangci-lint`, `govulncheck` och Trivy vid varje push. Imagen publiceras taggad med commit-SHA. |
+| CI/CD | GitHub Actions, GHCR, cosign och en systemd-timer på servern | Tester, `golangci-lint`, `govulncheck` och Trivy vid varje push och pull request. På `main` publiceras och signeras imagen, och servern hämtar och startar den själv, med automatisk återställning. Inga hemligheter i GitHub behövs. |
 | Tillgänglighet | WCAG 2.2 AAA, typsnittet Atkinson Hyperlegible | Kontrasten testas automatiskt, och sidan fungerar med tangentbord, skärmläsare och vid 320 px bredd. |
 
 ## Begränsningar
@@ -113,7 +115,7 @@ ai-kurs/
 - **Vinden kan vara gammal.** SMHI mäter en gång i timmen. Om SMHI är nere används den senaste vinden utan åldersgräns, och sidan säger inte att den är gammal.
 - **Mappningen till vindstationer är fast.** Den bygger på sparade mätpunkter från 2026-10-05. Mätpunkter som har tillkommit senare får ingen vind förrän mappningen skapas om.
 - **En omstart gör ett nytt anrop.** Femminutersregeln mot temperatur.nu sparas inte på disk, så varje omstart, även vid driftsättning, hämtar listan på nytt.
-- **Ingen automatisk driftsättning än.** CI bygger och publicerar imagen, men servern uppdateras för hand. Planen finns i [docs/plan-cicd-2026-11-17.md](docs/plan-cicd-2026-11-17.md).
+- **Driftsättningen tar ett par minuter.** Servern frågar efter nya versioner en gång i minuten i stället för att få dem skickade, eftersom den inte har några öppna portar.
 - **Filnamnen saknar hash.** Efter en ny version kan en CDN framför servern ge besökare gammal JavaScript och CSS i upp till fyra timmar.
 - **Datan från temperatur.nu kontrolleras inte i alla delar.** Orimliga värden (t.ex. 999 °C eller texten "NaN") används som de är.
 - **Appen begränsar inte antalet anrop per besökare.** Det skyddet förutsätts ligga framför servern.

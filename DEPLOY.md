@@ -89,9 +89,11 @@ chmod 600 .env
 
 ## 6. Bygg och starta appen
 
+Första gången, innan den automatiska driftsättningen i steg 11 är uppsatt, byggs imagen på servern:
+
 ```bash
 cd <appkatalog>
-sudo docker compose up -d --build
+sudo docker compose -f docker-compose.yml -f compose.build.yml up -d --build
 sudo docker compose ps                       # STATUS ska vara "Up"
 sudo docker compose logs --tail 20
 curl -s http://127.0.0.1:8080/healthz        # svarar "ok" (se nedan)
@@ -116,30 +118,24 @@ Containrarna startar om av sig själva vid krasch och när servern startas om (`
 
 ## 8. Uppdatera och rulla tillbaka
 
-Ny version:
+När steg 11 är uppsatt sköts nya versioner automatiskt: en push till `main` som klarar CI driftsätts inom ett par minuter, och en version som inte blir frisk rullas tillbaka av sig själv.
+
+Säkerhetsuppdateringar i Go och basimagen kommer som pull requests från Dependabot. När de mergas byggs och driftsätts en ny image. Den omvända proxyn och tunnelklienten uppdateras för hand ungefär en gång i månaden:
 
 ```bash
-cd <appkatalog>
-git pull
-sudo docker compose up -d --build
-sudo docker image prune -f
-```
-
-En gång i månaden, för säkerhetsuppdateringar i Go, basimagen, den omvända proxyn och tunnelklienten (även om koden inte ändrats):
-
-```bash
-cd <appkatalog> && sudo docker compose build --pull && sudo docker compose up -d
 cd <serverrepot> && sudo docker compose pull && sudo docker compose up -d
 ```
 
-Rulla tillbaka till en tidigare version:
+Rulla tillbaka för hand till en tidigare version (digesten för varje version står i sammanfattningen av CI-körningen på GitHub, och den förra versionen i `/var/lib/temperatur-deploy/previous`):
 
 ```bash
-git log --oneline | head          # hitta commiten som fungerade
-git checkout <commit>
-sudo docker compose up -d --build
-git checkout main                 # när felet är rättat och du vill tillbaka
+cd <appkatalog>
+sudo docker pull ghcr.io/<github-konto>/<repo>@sha256:<digest>
+sudo IMAGE_REF=ghcr.io/<github-konto>/<repo>@sha256:<digest> docker compose up -d
+echo sha256:<digest> | sudo tee /var/lib/temperatur-deploy/current
 ```
+
+Den automatiska driftsättningen fortsätter sedan med nästa nya version. Vill du stoppa den under tiden: `sudo systemctl stop pull-deploy.timer`.
 
 > Varje omstart av appen gör ett nytt anrop mot temperatur.nu. Starta inte om den i en loop – vänta minst fem minuter mellan omstarter om du felsöker.
 
@@ -162,12 +158,97 @@ git checkout main                 # när felet är rättat och du vill tillbaka
 | Gul varning "Temperaturerna kan vara inaktuella" | Fyra misslyckade hämtningar i rad | Loggen visar orsaken; kontrollera nätverket och att klienten inte är blockerad hos temperatur.nu |
 | Loggen säger `klienten är blockerad` | temperatur.nu har blockerat `cli` | Kontakta temperatur.nu; skaffa/lägg in `TNU_CLI_KEY` |
 
-## CI/CD (GitHub Actions)
+## 11. Automatisk driftsättning (CI/CD)
 
-- **`.github/workflows/ci.yml`** körs för varje PR och push till `main`: formatering, `go vet`, `go test -race` (inklusive kontrasttestet), benchmarken för `Suggest`, `govulncheck`, `golangci-lint` samt Docker-bygge med Trivy-skanning.
-- **`.github/workflows/publish.yml`** körs efter merge till `main`: bygger imagen, skannar den och publicerar den på GHCR som `ghcr.io/<ägare>/<repo>:<commit-SHA>`.
-- Actions är låsta till commit-SHA (Dependabot föreslår uppdateringar) och workflows har minsta möjliga `permissions`. Inga hemligheter används av CI; `publish` använder bara det inbyggda `GITHUB_TOKEN`.
-- **Driftsättningen på servern är inte automatiserad än.** Tills den är det gäller steg 8 ovan. Planen finns i [docs/plan-cicd-2026-11-17.md](docs/plan-cicd-2026-11-17.md).
+### Så fungerar det
+
+```
+push/merge till main
+  └─► GitHub Actions (.github/workflows/ci.yml)
+        ├─ Go:     gofmt, go vet, go test -race, benchmark, govulncheck
+        ├─ Lint:   golangci-lint
+        ├─ Docker: bygge och sårbarhetsskanning (Trivy)
+        └─ Publicera och signera (bara på main, bara om allt ovan lyckas):
+             bygg → Trivy → publicera på GHCR (<commit-SHA> och main) → signera med cosign
+                                     │
+                                     ▼
+servern: pull-deploy.timer (varje minut)
+  └─ pull-deploy.sh
+       1. vilken digest pekar taggen main på? samma som nu → klart
+       2. kontrollera signaturen (rätt repo, workflow och gren) → annars stopp och larm
+       3. hämta och starta den nya versionen
+       4. vänta på att containern blir "healthy" (Dockers HEALTHCHECK mot /healthz)
+       5. inte frisk inom HEALTH_TIMEOUT → starta föregående version igen och larma
+```
+
+Servern har inga öppna portar, så GitHub kan inte skicka något dit. Servern frågar i stället registret själv, och kör bara imagar som CI har byggt, testat, skannat och signerat. Ingen kod från GitHub körs på servern.
+
+Varje start av appen gör ett anrop mot temperatur.nu. En ny version startas därför högst en gång, och en version som har rullats tillbaka försöks inte igen. En version ger högst två extra anrop.
+
+### GitHub Secrets
+
+**Inga egna hemligheter behövs i GitHub.** Pipelinen använder bara det inbyggda `GITHUB_TOKEN`, som GitHub skapar för varje körning:
+
+- `packages: write` för att publicera imagen på GHCR, och bara i publiceringsjobbet.
+- `id-token: write` för att signera med cosign utan nyckel. GitHub ger ett kortlivat OIDC-certifikat som visar vilket repo, workflow och gren som byggde imagen, så det finns ingen signeringsnyckel att förvara eller läcka.
+
+Den enda hemligheten för driftsättningen ligger **på servern**, inte i GitHub: en token som bara får läsa paket (se nedan). Appens hemligheter (`TNU_CLI`, `TNU_CLI_KEY`) ligger som förut i `.env` på servern.
+
+### Ställ in GitHub
+
+1. **Skydda `main`** (Settings → Rules → Rulesets, eller Branches): kräv pull request, kräv att kontrollerna **Go**, **Lint** och **Docker** är gröna, och förbjud force-push och borttagning.
+2. **Environment `production`** skapas automatiskt vid första körningen (Settings → Environments). Där kan du begränsa den till grenen `main` och, om du vill, kräva ett godkännande innan publiceringen körs.
+3. **Paketets synlighet:** efter första publiceringen finns imagen under Packages. Är den privat behöver servern en token (steg 2 nedan). Är den publik behövs ingen. Imagen innehåller inga hemligheter, men koden går att läsa ut ur den.
+
+### Ställ in servern
+
+1. **Installera cosign** enligt https://docs.sigstore.dev/cosign/system_config/installation/ (ladda ned binären för `linux-amd64` från GitHub-releasen och kontrollera checksumman). `docker buildx` följer med Dockers officiella paket.
+
+2. **Logga in mot GHCR** (bara om paketet är privat). Skapa en *classic* personal access token på GitHub med **endast** behörigheten `read:packages`, och logga in som root (skriptet körs som root):
+
+   ```bash
+   sudo docker login ghcr.io -u <github-konto> --password-stdin   # klistra in token, avsluta med Ctrl+D
+   ```
+
+   Inloggningen sparas i `/root/.docker/config.json`. Läcker token kan den bara läsa paket. Ta bort den på GitHub och logga in med en ny.
+
+3. **Installera skriptet och inställningarna:**
+
+   ```bash
+   cd <appkatalog>
+   sudo install -m 0755 deploy/pull-deploy.sh /usr/local/bin/pull-deploy
+   sudo install -m 0600 deploy/deploy.env.example /etc/temperatur-deploy.env
+   sudo nano /etc/temperatur-deploy.env      # IMAGE, APP_DIR, SIGNER_IDENTITY, ev. NOTIFY_URL
+   ```
+
+4. **Prova en gång för hand** när CI har publicerat minst en version:
+
+   ```bash
+   sudo /usr/local/bin/pull-deploy /etc/temperatur-deploy.env
+   sudo docker compose -f <appkatalog>/docker-compose.yml ps    # STATUS ska säga "healthy"
+   ```
+
+5. **Slå på timern:**
+
+   ```bash
+   sudo install -m 0644 deploy/pull-deploy.service deploy/pull-deploy.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now pull-deploy.timer
+   systemctl list-timers pull-deploy.timer     # nästa körning
+   journalctl -u pull-deploy -f                # vad som händer
+   ```
+
+Efter en ändring av skriptet eller enheterna i repot installeras de igen med samma kommandon.
+
+### Felsökning
+
+| Symptom | Trolig orsak | Åtgärd |
+|---|---|---|
+| `unauthorized` eller `denied` från registret | Servern är inte inloggad, eller token saknar `read:packages` | Steg 2 ovan |
+| `signaturen stämmer inte` | `SIGNER_IDENTITY` stämmer inte med repot/workflowet, eller imagen är inte signerad | Kontrollera värdet i `/etc/temperatur-deploy.env` mot repots namn |
+| `blev inte frisk … tillbaka på` | Den nya versionen startar inte eller svarar inte på `/healthz` | `sudo docker compose logs` i `<appkatalog>`; rätta och pusha en ny version |
+| Inget händer efter en push | CI misslyckades, eller timern är avslagen | Actions-fliken på GitHub; `systemctl status pull-deploy.timer` |
+| En version försöks inte igen | Den finns i `/var/lib/temperatur-deploy/rejected` | Avsiktligt; pusha en rättad version, eller ta bort filen för att försöka igen |
 
 ## Innan adressen sprids
 

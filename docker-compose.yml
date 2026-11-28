@@ -1,6 +1,10 @@
 services:
   temperatur:
-    build: .
+    # Servern kör den image som CI har byggt, testat och signerat, låst till
+    # sin digest. IMAGE_REF sätts av deploy/pull-deploy.sh. För att bygga
+    # lokalt i stället: docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+    image: ${IMAGE_REF:-temperatur:local}
+    pull_policy: never # imagen hämtas och kontrolleras av driftskriptet, aldrig av compose
     restart: unless-stopped
     env_file: .env
     ports:

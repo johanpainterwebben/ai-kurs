@@ -72,7 +72,7 @@ Listan över mätpunkter ska vara så lätt som möjligt, och mer data hämtas f
 
 ### CI/CD
 
-Verktyget är **GitHub Actions**. `.github/workflows/ci.yml` (Go-kontroller, `golangci-lint`, Docker-bygge med Trivy) och `publish.yml` (bygger och publicerar imagen på GHCR) finns redan. Det som återstår, och besluten om hur, står i `docs/plan-cicd-2026-11-17.md`. Målbilden:
+Verktyget är **GitHub Actions**. Allt ligger i `.github/workflows/ci.yml`: Go-kontroller, `golangci-lint` och Docker-bygge med Trivy vid varje pull request och push mot `main`, och på `main` dessutom jobbet *Publicera och signera* (bara om alla kontroller lyckas). Servern driftsätter själv med `deploy/pull-deploy.sh` och en systemd-timer (se DEPLOY.md, steg 11). Det som återstår är frontendstegen (väntar på Svelte); planen och besluten står i `docs/plan-cicd-2026-11-17.md`. Målbilden:
 
 - **Vid varje PR och push:**
   - Go: `go vet ./...`, `go test -race ./...`, benchmarken för `Suggest`, `govulncheck` och `golangci-lint` (`.golangci.yml`; ett rött lint-steg blockerar).

@@ -1,0 +1,10 @@
+[Unit]
+Description=Kollar varje minut om CI har publicerat en ny version av temperatur-appen
+
+[Timer]
+OnBootSec=2min
+# Räknas från när förra körningen blev klar, så två körningar aldrig överlappar.
+OnUnitInactiveSec=1min
+
+[Install]
+WantedBy=timers.target
